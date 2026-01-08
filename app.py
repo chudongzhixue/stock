@@ -224,7 +224,6 @@ def format_money(num):
     if pd.isna(num) or num == 0:
         return "N/A"
     
-    # 强制转为float防止类型错误
     num = float(num)
     
     if num > 100000000: 
@@ -455,7 +454,7 @@ if not df.empty:
                                         df.loc[df.code==code,'group']=new_grp
                                         save_data(df)
                                         st.rerun()
-                        # 🔥🔥🔥 修复变量名拼写错误 🔥🔥🔥
+                        # 🔥 变量名修正 🔥
                         with col_del_btn: 
                              if st.button("🗑️", key=f"d_{code}"):
                                 delete_single_stock(code)
@@ -468,20 +467,19 @@ if not df.empty:
                         st.markdown(f"<span class='strategy-tag {strategy_class}'>{strategy_text}</span>", unsafe_allow_html=True)
                         if cost_low>0: st.markdown(f"<div class='cost-range-box'>主力: {cost_low:.2f}</div>", unsafe_allow_html=True)
                         
-                        # S/R
+                        # 🔥 S/R 小数点修正：强制 :.2f 🔥
                         r1, r2, s1, s2 = float(row['r1']), float(row['r2']), float(row['s1']), float(row['s2'])
                         st.markdown(f"""
                         <div class='sr-block'>
-                            <div class='sr-item'><span style='color:#d9534f'>R2</span> {r2}{get_dist_html(r2, price)}</div>
-                            <div class='sr-item'><span style='color:#5cb85c'>S1</span> {s1}{get_dist_html(s1, price)}</div>
-                            <div class='sr-item'><span style='color:#f0ad4e'>R1</span> {r1}{get_dist_html(r1, price)}</div>
-                            <div class='sr-item'><span style='color:#4cae4c'>S2</span> {s2}{get_dist_html(s2, price)}</div>
+                            <div class='sr-item'><span style='color:#d9534f'>R2</span> {r2:.2f}{get_dist_html(r2, price)}</div>
+                            <div class='sr-item'><span style='color:#5cb85c'>S1</span> {s1:.2f}{get_dist_html(s1, price)}</div>
+                            <div class='sr-item'><span style='color:#f0ad4e'>R1</span> {r1:.2f}{get_dist_html(r1, price)}</div>
+                            <div class='sr-item'><span style='color:#4cae4c'>S2</span> {s2:.2f}{get_dist_html(s2, price)}</div>
                         </div>
                         """, unsafe_allow_html=True)
                         if str(row['note']) not in ['nan', '']: st.caption(f"📝 {row['note']}")
                         
-                        # 🔥🔥🔥 智能可折叠预案 (仅限 1-3板) 🔥🔥🔥
-                        # 使用 st.expander 保证不挤压布局，展开时自动将下方个股顶下去
+                        # 智能可折叠预案 (仅限 1-3板)
                         if 1 <= zt_count <= 3 or strategy_text == "🚀 首板启动":
                             with st.expander(f"🎲 点击推演: {zt_count}进{zt_count+1}"):
                                 plan_html, advice_html = generate_plan_and_advice(code, name, price, open_p, pre_close, max_amt_60d, zt_count)
