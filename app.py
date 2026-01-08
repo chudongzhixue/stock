@@ -15,7 +15,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 🎨 CSS 样式 ---
+# --- 🎨 CSS 样式 (优化图标按钮布局) ---
 st.markdown("""
     <style>
         html, body, p, div, span { font-family: 'Source Sans Pro', sans-serif; color: #0E1117; }
@@ -23,18 +23,17 @@ st.markdown("""
         
         /* 卡片容器 */
         div[data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid #f0f0f0 !important;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.05); 
+            border: 1px solid #eee !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05); 
             background-color: #ffffff; 
-            padding: 10px !important;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            position: relative; /* 为了定位删除按钮 */
+            padding: 12px !important;
+            border-radius: 10px;
+            margin-bottom: 12px;
         }
 
         /* 价格大字 */
         .big-price {
-            font-size: 3.0rem; font-weight: 900; line-height: 1.0; letter-spacing: -2px; margin-bottom: 5px;
+            font-size: 3.2rem; font-weight: 900; line-height: 1.0; letter-spacing: -2px; margin-bottom: 5px;
         }
         .price-up { color: #d9534f; }
         .price-down { color: #5cb85c; }
@@ -43,7 +42,7 @@ st.markdown("""
         .stock-name { font-size: 1.1rem; font-weight: bold; color: #333; }
         .stock-code { font-size: 0.9rem; color: #999; margin-left: 5px; }
         
-        /* 策略标签体系 */
+        /* 策略标签 */
         .strategy-tag {
             padding: 3px 6px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; 
             color: white; display: inline-block; vertical-align: middle; margin-right: 5px;
@@ -54,34 +53,63 @@ st.markdown("""
         .tag-wait { background-color: #999; }
         .tag-special { background-color: #f0ad4e; }
 
-        /* 成本区间样式 */
+        /* 成本区间 */
         .cost-range-box {
             background-color: #f8f9fa; border-left: 3px solid #666;
-            padding: 2px 6px; margin: 5px 0; border-radius: 0 4px 4px 0;
-            font-size: 0.8rem; color: #444;
+            padding: 3px 8px; margin: 8px 0; border-radius: 0 4px 4px 0;
+            font-size: 0.85rem; color: #444;
         }
         
         /* 支撑压力 */
         .sr-block {
-            padding-top: 4px; border-top: 1px dashed #eee;
-            display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+            padding-top: 6px; border-top: 1px dashed #eee;
+            display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
         }
-        .sr-item { font-size: 0.8rem; font-weight: bold; color: #555; }
+        .sr-item { font-size: 0.85rem; font-weight: bold; color: #555; }
         
-        /* 按钮优化 */
-        div[data-testid="stButton"] button {
-            width: 100%; border-radius: 4px; font-weight: bold; margin-top: 5px;
+        /* --- 🔥 核心UI调整：右上角图标按钮组 --- */
+        
+        /* 1. 让操作列的按钮紧凑排列 */
+        [data-testid="column"] .stButton button {
+             padding: 0px 8px;
+             min-height: 0px;
+             height: 32px; /* 固定高度 */
+             border: none;
+             background: transparent;
+             font-size: 1.1rem;
+             color: #888;
+             transition: all 0.2s;
         }
         
-        /* 删除按钮特别样式 (稍微小一点) */
-        button[kind="secondary"] {
-            border: none;
-            background: transparent;
-        }
+        /* 2. 删除按钮鼠标悬停 */
         button[kind="secondary"]:hover {
-            color: red;
-            background: #fff0f0;
+            color: #d9534f !important; /* 红色 */
+            background: #fff5f5 !important;
         }
+
+        /* 3. popover 按钮 (分组图标) 样式 */
+        div[data-testid="stPopover"] button {
+             padding: 0px 8px;
+             min-height: 0px;
+             height: 32px;
+             border: none;
+             background: transparent;
+             font-size: 1.1rem;
+             color: #888;
+        }
+        /* popover 悬停效果 */
+        div[data-testid="stPopover"] button:hover {
+             color: #007bff !important; /* 蓝色 */
+             background: #f0f8ff !important;
+        }
+        
+        /* 底部看图按钮保持原样 */
+        .view-chart-btn button {
+             width: 100%; border-radius: 4px; font-weight: bold; margin-top: 8px;
+             background-color: #f0f2f6; color: #31333F; height: auto; padding: 0.5rem;
+        }
+        .view-chart-btn button:hover { background-color: #e0e2e6; }
+
     </style>
 """, unsafe_allow_html=True)
 
@@ -105,7 +133,7 @@ def load_data():
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
 
-# 🔥 新增：单只股票删除功能
+# 单只股票删除功能
 def delete_single_stock(code_to_delete):
     df = load_data()
     if code_to_delete in df['code'].values:
@@ -215,7 +243,7 @@ st.sidebar.markdown("---")
 
 df = load_data()
 
-# 🔥 升级版：添加个股 + 快捷分组
+# 🔥 添加个股 + 快捷分组
 with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
     code_in = st.text_input("代码 (6位数)", key="cin")
     
@@ -242,11 +270,9 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
         r1=c2.number_input("压力1", value=float(st.session_state.calc_r1))
         r2=c2.number_input("压力2", value=float(st.session_state.calc_r2))
         
-        # 🔥 快捷分组逻辑
         existing_groups = df['group'].unique().tolist() if not df.empty else ["默认"]
         if "默认" not in existing_groups: existing_groups.insert(0, "默认")
         
-        # 增加一个“新建”选项
         select_options = ["✍️ 新建/手动输入"] + existing_groups
         selected_grp = st.selectbox("选择或新建分组", select_options, index=1 if len(select_options)>1 else 0)
         
@@ -294,6 +320,10 @@ if not df.empty:
         col = "#d9534f" if abs(d)<1.0 else "#f0ad4e" if abs(d)<3.0 else "#999"
         return f"<span style='color:{col}; font-weight:bold;'>({d:+.1f}%)</span>"
 
+    # 获取所有分组列表，用于 popover 选择
+    all_groups_for_popover = df['group'].unique().tolist()
+    if "默认" not in all_groups_for_popover: all_groups_for_popover.insert(0, "默认")
+
     for group in df['group'].unique():
         st.subheader(f"📂 {group}")
         group_df = df[df['group'] == group]
@@ -316,28 +346,66 @@ if not df.empty:
                 
                 with cols[j]:
                     with st.container(border=True):
-                        # 第一行：名字+删除按钮
-                        col_name, col_del = st.columns([4, 1])
+                        # 🔥🔥🔥 核心UI升级：右上角图标操作区 🔥🔥🔥
+                        # 使用 5:1:1 的比例，将名字、分组图标、删除图标排成一行
+                        col_name, col_grp_btn, col_del_btn = st.columns([5, 1, 1])
+                        
                         with col_name:
-                            st.markdown(f"<div><span class='stock-name'>{name}</span> <span class='stock-code'>{code}</span></div>", unsafe_allow_html=True)
-                        with col_del:
-                            # 🔥 直接删除按钮
+                            # 显示股票名称和代码
+                            st.markdown(f"<div style='white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'><span class='stock-name'>{name}</span> <span class='stock-code'>{code}</span></div>", unsafe_allow_html=True)
+                        
+                        with col_grp_btn:
+                            # 🔥 分组修改弹窗 (Popover)
+                            # 点击这个 🏷️ 图标，会弹出一个小浮窗
+                            with st.popover("🏷️", help="修改分组"):
+                                st.markdown(f"##### 修改 【{name}】 的分组")
+                                # 选择已有分组
+                                new_group_select = st.selectbox("选择已有分组", ["(不变)"] + all_groups_for_popover, key=f"grp_sel_{code}")
+                                # 手动输入新分组
+                                new_group_input = st.text_input("或输入新分组名称", key=f"grp_inp_{code}")
+                                
+                                # 确定最终的新分组名称
+                                final_new_group = None
+                                if new_group_input.strip():
+                                    final_new_group = new_group_input.strip()
+                                elif new_group_select != "(不变)":
+                                    final_new_group = new_group_select
+                                    
+                                # 确认修改按钮
+                                if st.button("✅ 确认修改", key=f"confirm_grp_{code}"):
+                                    if final_new_group and final_new_group != group:
+                                        # 更新 Dataframe 并保存
+                                        df.loc[df.code == code, 'group'] = final_new_group
+                                        save_data(df)
+                                        st.toast(f"已将 {name} 移动到 【{final_new_group}】 分组")
+                                        time.sleep(0.5)
+                                        st.rerun() # 刷新页面
+                                    elif final_new_group == group:
+                                         st.toast("分组未发生变化")
+                                    else:
+                                         st.toast("请选择或输入新的分组名称")
+
+                        with col_del_btn:
+                            # 🔥 直接删除按钮 (垃圾桶图标)
                             if st.button("🗑️", key=f"del_{code}", help="删除个股"):
                                 if delete_single_stock(code):
                                     st.toast(f"{name} 已删除")
                                     time.sleep(0.5)
                                     st.rerun()
 
-                        # 价格
+                        # --- 下面是卡片主体内容 ---
+                        
+                        # 价格大字
                         st.markdown(f"<div class='big-price {price_color}'>{price:.2f}</div>", unsafe_allow_html=True)
                         
-                        # 连板与涨跌
+                        # 连板数 + 涨跌幅
                         zt_badge = f"<span style='background:#ff0000;color:white;padding:1px 4px;border-radius:3px;font-size:0.8rem;margin-left:5px'>{zt_count}连板</span>" if zt_count>=2 else ""
                         st.markdown(f"<div style='font-weight:bold; margin-bottom:8px;'>{chg:+.2f}% {zt_badge}</div>", unsafe_allow_html=True)
                         
-                        # 策略
+                        # 策略标签
                         st.markdown(f"<div style='margin-bottom:8px'><span class='strategy-tag {strategy_class}'>{strategy_text}</span></div>", unsafe_allow_html=True)
                         
+                        # 主力成本
                         if cost_low > 0:
                             st.markdown(f"<div class='cost-range-box'>主力成本: {cost_low:.2f}</div>", unsafe_allow_html=True)
 
@@ -353,11 +421,15 @@ if not df.empty:
                         </div>
                         """, unsafe_allow_html=True)
                         
+                        # 笔记
                         if str(row['note']) not in ['nan', '']:
                             st.caption(f"📝 {row['note']}")
                         
+                        # 看图按钮 (增加了一个class方便CSS定位)
+                        st.markdown('<div class="view-chart-btn">', unsafe_allow_html=True)
                         if st.button("📈 看图", key=f"btn_{code}"):
                             view_chart_modal(code, name)
+                        st.markdown('</div>', unsafe_allow_html=True)
 
 else: st.info("👈 请在左侧添加股票")
 
