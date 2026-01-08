@@ -5,8 +5,9 @@ import os
 import time
 import numpy as np
 import akshare as ak
-import yfinance as yf # 引入备用数据源
+import yfinance as yf
 from datetime import datetime, timedelta, time as dt_time
+from concurrent.futures import ThreadPoolExecutor, as_completed # 🔥 引入多线程工具
 
 # --- 页面基础设置 ---
 st.set_page_config(
@@ -122,77 +123,56 @@ def get_realtime_quotes(code_list):
         return data
     except: return {}
 
-# 🔥 双引擎数据获取 (Akshare + Yahoo备用)
+# 🔥 带缓存的数据获取函数 (不需要变)
 @st.cache_data(ttl=3600)
 def get_stock_history_metrics(code):
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
-    
     stock_df = None
     
-    # 🌟 方案 A: 尝试国内 Akshare (可能会在国外服务器超时)
+    # 方案 A: Akshare
     try:
         stock_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
-    except:
-        pass # 失败了不报错，直接去方案B
+    except: pass
         
-    # 🌟 方案 B: 如果 A 失败，切换到 Yahoo Finance (国外服务器速度快)
+    # 方案 B: Yahoo
     if stock_df is None or stock_df.empty:
         try:
-            # 转换代码格式：600xxx -> 600xxx.SS, 000xxx/300xxx -> .SZ
             y_code = f"{code}.SS" if code.startswith('6') else f"{code}.SZ"
-            if code.startswith(('8', '4')): y_code = f"{code}.BJ" # 北交所
-            
-            # 下载数据
+            if code.startswith(('8', '4')): y_code = f"{code}.BJ"
             y_data = yf.download(y_code, period="3mo", progress=False)
             if not y_data.empty:
-                # 格式化成和 Akshare 一样的列名，方便后续计算
                 y_data = y_data.reset_index()
                 y_data.columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量'] if len(y_data.columns)==6 else y_data.columns
-                # 简单重命名
                 y_data.rename(columns={'Date': '日期', 'Open': '开盘', 'High': '最高', 'Low': '最低', 'Close': '收盘', 'Volume': '成交量'}, inplace=True)
-                # 计算涨跌幅 (Yahoo不直接提供，需计算)
                 y_data['涨跌幅'] = y_data['收盘'].pct_change() * 100
-                # 估算成交额 (Yahoo有时不准，用收盘*成交量粗算)
                 y_data['成交额'] = y_data['收盘'] * y_data['成交量'] 
                 stock_df = y_data
-        except:
-            pass
+        except: pass
 
-    # 🔥 统一计算指标
     if stock_df is not None and not stock_df.empty:
         try:
             stock_df['MA5'] = stock_df['收盘'].rolling(5).mean()
             stock_df['MA10'] = stock_df['收盘'].rolling(10).mean()
             stock_df['MA20'] = stock_df['收盘'].rolling(20).mean()
-            
             recent = stock_df.tail(20)
             total_amt = recent['成交额'].sum()
             total_vol = recent['成交量'].sum()
-            # 注意：Yahoo的数据单位已经是股，不需要*100；Akshare是手，需要*100
-            # 这里的兼容性处理比较复杂，我们做一个简单的容错：
             if total_vol > 0:
                 avg_cost = total_amt / total_vol
-                # 如果算出来成本特别大(几千)，说明是按手算的，除以100
                 if avg_cost > 200: avg_cost /= 100 
-            else:
-                avg_cost = 0
+            else: avg_cost = 0
             
             stock_df['is_zt'] = stock_df['涨跌幅'] > 9.5
             zt_count = 0
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            # 简单判断，不纠结时区，取最后一行
             check_df = stock_df.copy()
-            
             for i in range(len(check_df)-1, -1, -1):
                 if check_df.iloc[i]['is_zt']: zt_count += 1
                 else: break
             
             # 返回: 历史数据, 主力成本, 连板数, 昨天是否涨停
             return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False
-        except:
-            return None, 0, 0, False
-
+        except: return None, 0, 0, False
     return None, 0, 0, False
 
 # 🧠 游资策略引擎
@@ -203,39 +183,32 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt):
     pct_chg = ((price - pre_close) / pre_close) * 100
     day_vwap = info['amount'] / info['vol'] if info['vol'] > 0 else price
     
-    if history_df is None or history_df.empty: return "数据不足(网络波动)", "tag-wait"
+    if history_df is None or history_df.empty: return "数据加载中...", "tag-wait"
     
-    # 获取最后有效均线
     try:
         ma5 = history_df.iloc[-1]['MA5']
         ma10 = history_df.iloc[-1]['MA10']
         ma20 = history_df.iloc[-1]['MA20']
-        if pd.isna(ma5): return "数据计算中", "tag-wait"
+        if pd.isna(ma5): return "计算中...", "tag-wait"
     except: return "数据错误", "tag-wait"
 
-    # 1. 妖股/连板锁仓
     if zt_count >= 2:
         if pct_chg > 9.5: return f"💎 {zt_count+1}板锁仓", "tag-dragon"
         elif price > day_vwap and price > ma5: return f"🔥 妖股持筹 ({zt_count}板)", "tag-dragon"
         elif price < ma5: return "💀 断板止盈", "tag-sell"
     
-    # 2. 连板接力
     if yesterday_zt and zt_count < 3:
         if 2 < pct_chg < 9.0 and price > day_vwap: return f"🚀 {zt_count}进{zt_count+1} 接力", "tag-buy"
     
-    # 3. 龙头首阴
     if zt_count >= 3 and pct_chg < -3 and price > ma10: return "🐲 龙头首阴(反核)", "tag-special"
     
-    # 4. 仙人指路
     high_pct = ((high - pre_close) / pre_close) * 100
     if high_pct > 7 and pct_chg < 3 and price > ma20: return "👆 仙人指路", "tag-special"
     
-    # 5. 趋势低吸
     if price > ma20 and ma10 > ma20:
         dist_ma10 = abs(price - ma10) / ma10
         if dist_ma10 < 0.02: return "🌊 MA10 低吸", "tag-buy"
     
-    # 6. 常规状态
     if pct_chg > 9.8: return "🚀 涨停持股", "tag-dragon"
     if price > day_vwap: return "💪 强势整理", "tag-wait"
     if price < day_vwap: return "👀 弱势观望", "tag-wait"
@@ -243,18 +216,16 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt):
 
 # --- 侧边栏 ---
 st.sidebar.title("Control Panel")
-
 enable_refresh = st.sidebar.toggle("⚡ 智能实时刷新", value=True)
 trading_active, status_msg = is_trading_time()
 status_color = "green" if trading_active else "gray"
 st.sidebar.markdown(f"当前状态: <span style='color:{status_color};font-weight:bold'>{status_msg}</span>", unsafe_allow_html=True)
 
-if st.sidebar.button("🧹 强制刷新数据 (启用备用源)"):
+if st.sidebar.button("🧹 强制刷新数据"):
     st.cache_data.clear()
-    st.toast("正在切换至 Yahoo Finance 备用源重试...")
+    st.toast("正在重新拉取数据...")
     time.sleep(1)
     st.rerun()
-
 st.sidebar.markdown("---")
 
 df = load_data()
@@ -266,7 +237,7 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
     
     if st.button("⚡ 智能计算支撑压力"):
         if code_in:
-            with st.spinner("双引擎计算中..."):
+            with st.spinner("计算中..."):
                 hist, cost, zt, _ = get_stock_history_metrics(code_in)
                 if hist is not None:
                     last = hist.iloc[-1]
@@ -284,22 +255,18 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
         s2=c1.number_input("支撑2", value=float(st.session_state.calc_s2))
         r1=c2.number_input("压力1", value=float(st.session_state.calc_r1))
         r2=c2.number_input("压力2", value=float(st.session_state.calc_r2))
-        
         existing_groups = df['group'].unique().tolist() if not df.empty else ["默认"]
         if "默认" not in existing_groups: existing_groups.insert(0, "默认")
         select_options = ["✍️ 新建/手动输入"] + existing_groups
         selected_grp = st.selectbox("选择或新建分组", select_options, index=1 if len(select_options)>1 else 0)
         final_grp = st.text_input("输入新分组名称", "龙头") if selected_grp == "✍️ 新建/手动输入" else selected_grp
         note=st.text_area("笔记 (可选)")
-        
         if st.form_submit_button("💾 保存") and code_in:
             name=""
             if code_in in df.code.values: name=df.loc[df.code==code_in,'name'].values[0]
             new={"code":code_in,"name":name,"s1":s1,"s2":s2,"r1":r1,"r2":r2,"group":final_grp,"note":note}
-            if code_in in df.code.values: 
-                df.loc[df.code==code_in, list(new.keys())]=list(new.values())
-            else: 
-                df=pd.concat([df,pd.DataFrame([new])],ignore_index=True)
+            if code_in in df.code.values: df.loc[df.code==code_in, list(new.keys())]=list(new.values())
+            else: df=pd.concat([df,pd.DataFrame([new])],ignore_index=True)
             save_data(df)
             st.success(f"{code_in} 已保存")
             time.sleep(0.5)
@@ -313,12 +280,35 @@ def view_chart_modal(code, name):
     with t1: st.image(f"https://webquotepic.eastmoney.com/GetPic.aspx?nid={mid}.{code}&imageType=r&t={ts}", use_container_width=True)
     with t2: st.image(f"https://webquotepic.eastmoney.com/GetPic.aspx?nid={mid}.{code}&imageType=k&t={ts}", use_container_width=True)
 
+# --- 🔥 并发数据预加载 (极速优化核心) ---
+def prefetch_all_data(stock_codes):
+    results = {}
+    # 使用线程池并发抓取，最多同时开10个线程
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        # 提交所有任务
+        future_to_code = {executor.submit(get_stock_history_metrics, code): code for code in stock_codes}
+        # 等待任务完成
+        for future in as_completed(future_to_code):
+            code = future_to_code[future]
+            try:
+                data = future.result()
+                results[code] = data
+            except:
+                results[code] = (None, 0, 0, False)
+    return results
+
 # --- 主界面 ---
 st.title("Alpha 游资系统")
 if st.button('🔄 全局刷新', type="primary"): st.rerun()
 
 if not df.empty:
     quotes = get_realtime_quotes(df['code'].tolist())
+    
+    # 🔥 在循环开始前，一次性并发抓取所有策略数据！
+    # 这样页面加载时会有一个统一的等待，然后瞬间渲染出来，而不是一个个蹦。
+    with st.spinner("🚀 正在极速分析游资数据..."):
+        batch_strategy_data = prefetch_all_data(df['code'].unique().tolist())
+
     def get_dist_html(target, current):
         try: target=float(target); current=float(current)
         except: return ""
@@ -346,8 +336,8 @@ if not df.empty:
                 chg = ((price-pre)/pre)*100 if pre else 0
                 price_color = "price-up" if chg > 0 else ("price-down" if chg < 0 else "price-gray")
                 
-                # 🔥 获取数据(含备用源)
-                hist_df, cost_low, zt_count, yesterday_zt = get_stock_history_metrics(code)
+                # 🔥 直接从预加载的字典里取数据，速度飞快！
+                hist_df, cost_low, zt_count, yesterday_zt = batch_strategy_data.get(code, (None, 0, 0, False))
                 strategy_text, strategy_class = ai_strategy_engine(info, hist_df, cost_low, zt_count, yesterday_zt)
                 
                 with cols[j]:
