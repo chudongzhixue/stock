@@ -11,7 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 页面基础设置 ---
 st.set_page_config(
-    page_title="Alpha 游资操盘系统",
+    page_title="Alpha 游资操盘系统 Pro",
     page_icon="🐲",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -24,12 +24,12 @@ st.markdown("""
         .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
         
         div[data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid #eee !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05); 
+            border: 1px solid #e6e6e6 !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
             background-color: #ffffff; 
-            padding: 12px !important;
-            border-radius: 10px;
-            margin-bottom: 12px;
+            padding: 15px !important;
+            border-radius: 12px;
+            margin-bottom: 15px;
         }
 
         .big-price { font-size: 3.2rem; font-weight: 900; line-height: 1.0; letter-spacing: -2px; margin-bottom: 5px; }
@@ -37,22 +37,25 @@ st.markdown("""
         .price-down { color: #5cb85c; }
         .price-gray { color: #888; }
         
-        .stock-name { font-size: 1.1rem; font-weight: bold; color: #333; }
-        .stock-code { font-size: 0.9rem; color: #999; margin-left: 5px; }
+        .stock-name { font-size: 1.2rem; font-weight: bold; color: #222; }
+        .stock-code { font-size: 0.9rem; color: #888; margin-left: 5px; }
         
-        .strategy-tag { padding: 3px 6px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white; display: inline-block; vertical-align: middle; margin-right: 5px; }
-        .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); }
+        /* 策略标签体系 */
+        .strategy-tag { padding: 4px 8px; border-radius: 4px; font-size: 0.85rem; font-weight: bold; color: white; display: inline-block; vertical-align: middle; margin-right: 5px; }
+        .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); } /* 妖股红 */
+        .tag-first { background: linear-gradient(45deg, #ff9f43, #ff6b6b); } /* 首板橙 */
         .tag-buy { background-color: #d9534f; }
         .tag-sell { background-color: #5cb85c; }
         .tag-wait { background-color: #999; }
         .tag-special { background-color: #f0ad4e; }
         .tag-purple { background: linear-gradient(45deg, #8e44ad, #c0392b); }
 
-        .cost-range-box { background-color: #f8f9fa; border-left: 3px solid #666; padding: 3px 8px; margin: 8px 0; border-radius: 0 4px 4px 0; font-size: 0.85rem; color: #444; }
+        .cost-range-box { background-color: #f8f9fa; border-left: 3px solid #666; padding: 4px 8px; margin: 8px 0; border-radius: 0 4px 4px 0; font-size: 0.85rem; color: #444; }
         
-        .sr-block { padding-top: 6px; border-top: 1px dashed #eee; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
-        .sr-item { font-size: 0.85rem; font-weight: bold; color: #555; }
+        .sr-block { padding-top: 8px; border-top: 1px dashed #eee; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .sr-item { font-size: 0.9rem; font-weight: bold; color: #555; }
         
+        /* 按钮组样式 */
         [data-testid="column"] .stButton button { padding: 0px 8px; min-height: 0px; height: 32px; border: none; background: transparent; font-size: 1.1rem; color: #888; transition: all 0.2s; }
         button[kind="secondary"]:hover { color: #d9534f !important; background: #fff5f5 !important; }
         div[data-testid="stPopover"] button { padding: 0px 8px; min-height: 0px; height: 32px; border: none; background: transparent; font-size: 1.1rem; color: #888; }
@@ -60,6 +63,19 @@ st.markdown("""
         
         .view-chart-btn button { width: 100%; border-radius: 4px; font-weight: bold; margin-top: 8px; background-color: #f0f2f6; color: #31333F; height: auto; padding: 0.5rem; }
         .view-chart-btn button:hover { background-color: #e0e2e6; }
+
+        /* 策略推演框样式 */
+        .plan-box {
+            background-color: #fffbf0; 
+            border: 1px solid #ffeeba; 
+            border-radius: 6px; 
+            padding: 10px; 
+            margin-top: 10px;
+            font-size: 0.9rem;
+            color: #555;
+        }
+        .plan-title { font-weight: bold; color: #d9534f; margin-bottom: 5px; display: block;}
+        .plan-highlight { color: #d9534f; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -124,14 +140,17 @@ def get_realtime_quotes(code_list):
         return data
     except: return {}
 
+# 🔥 获取历史数据 (增加换手率计算)
 @st.cache_data(ttl=3600)
 def get_stock_history_metrics(code):
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
     stock_df = None
+    
     try:
         stock_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
     except: pass
+        
     if stock_df is None or stock_df.empty:
         try:
             y_code = f"{code}.SS" if code.startswith('6') else f"{code}.SZ"
@@ -143,6 +162,7 @@ def get_stock_history_metrics(code):
                 y_data.rename(columns={'Date': '日期', 'Open': '开盘', 'High': '最高', 'Low': '最低', 'Close': '收盘', 'Volume': '成交量'}, inplace=True)
                 y_data['涨跌幅'] = y_data['收盘'].pct_change() * 100
                 y_data['成交额'] = y_data['收盘'] * y_data['成交量'] 
+                y_data['换手率'] = 0 # Yahoo没有换手率，暂设0
                 stock_df = y_data
         except: pass
 
@@ -150,6 +170,7 @@ def get_stock_history_metrics(code):
         try:
             stock_df['MA5'] = stock_df['收盘'].rolling(5).mean()
             stock_df['MA10'] = stock_df['收盘'].rolling(10).mean()
+            
             recent = stock_df.tail(20)
             total_amt = recent['成交额'].sum()
             total_vol = recent['成交量'].sum()
@@ -157,6 +178,7 @@ def get_stock_history_metrics(code):
                 avg_cost = total_amt / total_vol
                 if avg_cost > 200: avg_cost /= 100 
             else: avg_cost = 0
+            
             stock_df['is_zt'] = stock_df['涨跌幅'] > 9.5
             
             zt_count = 0
@@ -175,10 +197,54 @@ def get_stock_history_metrics(code):
                     current_streak_temp = 0
             max_streak = max(max_streak, current_streak_temp)
             
-            return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False, max_streak
-        except: return None, 0, 0, False, 0
-    return None, 0, 0, False, 0
+            # 获取最新一天的换手率
+            last_turnover = stock_df.iloc[-1]['换手率'] if '换手率' in stock_df.columns else 0
+            last_vol = stock_df.iloc[-1]['成交量']
+            
+            return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False, max_streak, last_turnover, last_vol
+        except: return None, 0, 0, False, 0, 0, 0
+    return None, 0, 0, False, 0, 0, 0
 
+# --- 🧠 核心：1进2 操盘推演生成器 ---
+def generate_1to2_plan(code, name, price, turnover, last_vol, pre_close):
+    """
+    为首板个股生成详细的次日操盘预案
+    """
+    plan = []
+    success_rate = "中"
+    
+    # 基础参数估算
+    # 假设：如果今天烂板，明天需要弱转强；如果今天缩量，明天需要补量
+    
+    expected_vol = last_vol * 1.2 # 预期放量 20%
+    expected_open_low = pre_close * 1.02 # 2%
+    expected_open_high = pre_close * 1.06 # 6%
+    
+    # 竞价情绪判断标准
+    plan.append(f"**🗓️ 明日竞价关注点：**")
+    plan.append(f"- **竞价量能：** 需关注竞价结束(9:25)的成交量是否大于今日成交量的 **10%**。")
+    plan.append(f"- **开盘位置：** 理想开盘价在 **{expected_open_low:.2f} ~ {expected_open_high:.2f}** ({2}%~{6}%)。")
+    
+    # 场景推演
+    plan.append(f"\n**🎲 走势推演与对策：**")
+    
+    # 场景1：弱转强（机会）
+    plan.append(f"1. **🔥 弱转强（买入点）：**\n   若高开 **>3%** 且竞价抢筹明显，开盘后 **5分钟内** 价格不破开盘价，且分时均线向上发散。\n   👉 **策略：** 半路跟随或打板确认。")
+    
+    # 场景2：不及预期（风险）
+    plan.append(f"2. **❄️ 不及预期（卖出点）：**\n   若低开 **<-2%** 或平开后迅速下杀跌破分时均线，且成交量稀疏。\n   👉 **策略：** 反抽均线无力时离场，不幻想。")
+    
+    # 场景3：加速一字（持股）
+    plan.append(f"3. **🚀 加速秒板：**\n   若竞价直接涨停或开盘 **9:31** 前秒板。\n   👉 **策略：** 只要封单不撤，坚定锁仓。")
+    
+    # 换手率建议
+    plan.append(f"\n**📊 量能监控：**")
+    plan.append(f"- 今日换手率 **{turnover:.2f}%**。")
+    plan.append(f"- 明日最佳接力换手率预估：**{(turnover * 1.2):.2f}% - {(turnover * 1.5):.2f}%**。若换手不足缩量涨停，次日风险极大；若换手过大(>{turnover*2}%)，警惕主力出货。")
+    
+    return "\n".join(plan)
+
+# 🧠 策略引擎 (逻辑更新：首板识别)
 def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt, max_streak):
     price = info['price']
     pre_close = info['pre_close']
@@ -187,23 +253,31 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt, max
     day_vwap = info['amount'] / info['vol'] if info['vol'] > 0 else price
     
     if history_df is None or history_df.empty: return "数据加载中...", "tag-wait"
+    
     try:
         ma5 = history_df.iloc[-1]['MA5']
         ma10 = history_df.iloc[-1]['MA10']
     except: return "数据错误", "tag-wait"
 
+    # 1. 妖股判定
     if max_streak >= 4:
         if zt_count > 0: return f"🔥 妖股加速 ({zt_count}板)", "tag-dragon"
         elif pct_chg > 5.0: return "🦁 龙头震荡/二波", "tag-purple"
         elif pct_chg < -5.0 and price > ma10: return "🐲 龙头首阴(反核)", "tag-special"
-        elif price > day_vwap: return "🦁 龙头承接", "tag-special"
         else: return "💀 龙头退潮", "tag-sell"
 
+    # 2. 连板接力
     if zt_count >= 2: return f"🚀 {zt_count}连板持筹", "tag-dragon"
+    
+    # 🔥 核心修正：首板识别 (昨日没涨停，今日涨停)
+    if not yesterday_zt and pct_chg > 9.5:
+        return "🚀 首板启动", "tag-first" # 专门的橙色标签
+    
     if yesterday_zt and zt_count < 2:
         if 2 < pct_chg < 9.0 and price > day_vwap: return "🚀 1进2 接力", "tag-buy"
         if pct_chg > 9.0: return "🚀 秒板/一字", "tag-dragon"
     
+    # 3. 形态
     high_pct = ((high - pre_close) / pre_close) * 100
     if high_pct > 7 and pct_chg < 3 and price > ma5: return "👆 仙人指路", "tag-special"
     
@@ -218,11 +292,11 @@ def prefetch_all_data(stock_codes):
         for future in as_completed(future_to_code):
             code = future_to_code[future]
             try: results[code] = future.result()
-            except: results[code] = (None, 0, 0, False, 0)
+            except: results[code] = (None, 0, 0, False, 0, 0, 0)
     return results
 
 # --- 主界面 ---
-st.title("Alpha 游资系统")
+st.title("Alpha 游资系统 Pro")
 enable_refresh = st.sidebar.toggle("⚡ 智能实时刷新", value=True)
 trading_active, status_msg = is_trading_time()
 status_color = "green" if trading_active else "gray"
@@ -232,43 +306,24 @@ if st.sidebar.button("🧹 强制刷新数据"):
     st.cache_data.clear()
     st.rerun()
 
-# 🔥🔥🔥 核心新功能：数据备份与恢复 🔥🔥🔥
-st.sidebar.markdown("---")
-with st.sidebar.expander("📂 数据备份与恢复 (防止数据丢失)", expanded=False):
-    # 1. 下载按钮
+# 备份功能
+with st.sidebar.expander("📂 数据备份与恢复", expanded=False):
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "rb") as f:
-            st.download_button(
-                label="⬇️ 下载配置备份 (CSV)",
-                data=f,
-                file_name=f"stock_backup_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv",
-                help="代码更新前，请务必下载备份！"
-            )
-    
-    # 2. 上传恢复
-    uploaded_file = st.file_uploader("⬆️ 上传恢复备份", type=["csv"])
+            st.download_button("⬇️ 下载备份", f, file_name=f"stock_backup.csv", mime="text/csv")
+    uploaded_file = st.file_uploader("⬆️ 上传恢复", type=["csv"])
     if uploaded_file is not None:
         try:
-            # 读取上传的文件并覆盖本地文件
-            backup_df = pd.read_csv(uploaded_file, dtype={"code": str})
-            # 简单的格式校验
-            required_columns = ["code", "name", "group"]
-            if all(col in backup_df.columns for col in required_columns):
-                backup_df.to_csv(DATA_FILE, index=False)
-                st.success("✅ 数据恢复成功！正在刷新...")
-                time.sleep(1)
-                st.rerun()
-            else:
-                st.error("❌ 文件格式错误，请使用本系统导出的CSV")
-        except Exception as e:
-            st.error(f"❌ 恢复失败: {e}")
+            pd.read_csv(uploaded_file, dtype={"code": str}).to_csv(DATA_FILE, index=False)
+            st.success("恢复成功！")
+            st.rerun()
+        except: st.error("格式错误")
 
 st.sidebar.markdown("---")
 
 df = load_data()
 
-# 添加个股区域
+# 添加个股
 with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
     code_in = st.text_input("代码 (6位数)", key="cin").strip()
     if 'calc_s1' not in st.session_state: 
@@ -276,7 +331,7 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
     if st.button("⚡ 智能计算支撑压力"):
         if code_in:
             with st.spinner("计算中..."):
-                hist, cost, zt, _, max_streak = get_stock_history_metrics(code_in)
+                hist, cost, zt, _, max_streak, _, _ = get_stock_history_metrics(code_in)
                 if hist is not None:
                     last = hist.iloc[-1]
                     pivot = (last['最高']+last['最低']+last['收盘'])/3
@@ -284,9 +339,7 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
                     st.session_state.calc_s1 = round(2*pivot - last['最高'], 2)
                     st.session_state.calc_r2 = round(pivot + (last['最高'] - last['最低']), 2)
                     st.session_state.calc_s2 = round(pivot - (last['最高'] - last['最低']), 2)
-                    status_text = f"当前{zt}连板" if zt > 0 else "断板"
-                    high_status = f" (曾{max_streak}连板妖股)" if max_streak >= 4 else ""
-                    st.success(f"识别结果：{status_text}{high_status}")
+                    st.success(f"识别结果：{zt}连板 (曾{max_streak}板)")
     
     with st.form("add"):
         c1,c2=st.columns(2)
@@ -349,11 +402,13 @@ if not df.empty:
                 chg = ((price-pre)/pre)*100 if pre else 0
                 price_color = "price-up" if chg > 0 else ("price-down" if chg < 0 else "price-gray")
                 
-                hist_df, cost_low, zt_count, yesterday_zt, max_streak = batch_strategy_data.get(code, (None, 0, 0, False, 0))
+                # 获取数据
+                hist_df, cost_low, zt_count, yesterday_zt, max_streak, turnover, last_vol = batch_strategy_data.get(code, (None, 0, 0, False, 0, 0, 0))
                 strategy_text, strategy_class = ai_strategy_engine(info, hist_df, cost_low, zt_count, yesterday_zt, max_streak)
                 
                 with cols[j]:
                     with st.container(border=True):
+                        # 头部信息
                         col_name, col_grp_btn, col_del_btn = st.columns([5, 1, 1])
                         with col_name: st.markdown(f"<div style='white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'><span class='stock-name'>{name}</span> <span class='stock-code'>{code}</span></div>", unsafe_allow_html=True)
                         with col_grp_btn:
@@ -372,12 +427,23 @@ if not df.empty:
                                 if delete_single_stock(code):
                                     st.rerun()
                         
+                        # 价格与连板
                         st.markdown(f"<div class='big-price {price_color}'>{price:.2f}</div>", unsafe_allow_html=True)
                         zt_badge = f"<span style='background:#ff0000;color:white;padding:1px 4px;border-radius:3px;font-size:0.8rem;margin-left:5px'>{zt_count}连板</span>" if zt_count>=2 else ""
                         st.markdown(f"<div style='font-weight:bold; margin-bottom:8px;'>{chg:+.2f}% {zt_badge}</div>", unsafe_allow_html=True)
+                        
+                        # 策略标签
                         st.markdown(f"<div style='margin-bottom:8px'><span class='strategy-tag {strategy_class}'>{strategy_text}</span></div>", unsafe_allow_html=True)
+                        
+                        # 🔥🔥🔥 首板 1进2 预案推演 (核心新功能) 🔥🔥🔥
+                        if strategy_text == "🚀 首板启动":
+                            with st.expander("🎲 点击查看：1进2 操盘预案", expanded=True):
+                                plan_text = generate_1to2_plan(code, name, price, turnover, last_vol, pre_close)
+                                st.markdown(plan_text)
+                        
                         if cost_low > 0: st.markdown(f"<div class='cost-range-box'>主力成本: {cost_low:.2f}</div>", unsafe_allow_html=True)
                         
+                        # S/R
                         r1, r2 = float(row['r1']), float(row['r2'])
                         s1, s2 = float(row['s1']), float(row['s2'])
                         st.markdown(f"""
