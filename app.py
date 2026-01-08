@@ -40,14 +40,13 @@ st.markdown("""
         .stock-name { font-size: 1.1rem; font-weight: bold; color: #333; }
         .stock-code { font-size: 0.9rem; color: #999; margin-left: 5px; }
         
-        /* 🔥 策略标签体系升级 */
         .strategy-tag { padding: 3px 6px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white; display: inline-block; vertical-align: middle; margin-right: 5px; }
-        .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); } /* 龙头红 */
+        .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); }
         .tag-buy { background-color: #d9534f; }
         .tag-sell { background-color: #5cb85c; }
         .tag-wait { background-color: #999; }
-        .tag-special { background-color: #f0ad4e; } /* 橙色：特殊关注 */
-        .tag-purple { background: linear-gradient(45deg, #8e44ad, #c0392b); } /* 紫色：妖股二波/震荡 */
+        .tag-special { background-color: #f0ad4e; }
+        .tag-purple { background: linear-gradient(45deg, #8e44ad, #c0392b); }
 
         .cost-range-box { background-color: #f8f9fa; border-left: 3px solid #666; padding: 3px 8px; margin: 8px 0; border-radius: 0 4px 4px 0; font-size: 0.85rem; color: #444; }
         
@@ -95,16 +94,12 @@ def delete_single_stock(code_to_delete):
         return True
     return False
 
-# 🔥 时区修复：强制使用北京时间 (UTC+8)
 def is_trading_time():
-    # 云服务器通常是 UTC 时间，所以要 +8 小时
     now = datetime.utcnow() + timedelta(hours=8)
-    
     if now.weekday() >= 5: return False, "周末休市"
     current_time = now.time()
     am_start, am_end = dt_time(9, 15), dt_time(11, 30)
     pm_start, pm_end = dt_time(13, 0), dt_time(15, 0)
-    
     if (am_start <= current_time <= am_end) or (pm_start <= current_time <= pm_end):
         return True, "交易中"
     return False, "非交易时间"
@@ -129,17 +124,14 @@ def get_realtime_quotes(code_list):
         return data
     except: return {}
 
-# 🔥 数据获取升级：计算"历史最大连板数" (Max Streak)
 @st.cache_data(ttl=3600)
 def get_stock_history_metrics(code):
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
     stock_df = None
-    
     try:
         stock_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
     except: pass
-        
     if stock_df is None or stock_df.empty:
         try:
             y_code = f"{code}.SS" if code.startswith('6') else f"{code}.SZ"
@@ -158,7 +150,6 @@ def get_stock_history_metrics(code):
         try:
             stock_df['MA5'] = stock_df['收盘'].rolling(5).mean()
             stock_df['MA10'] = stock_df['收盘'].rolling(10).mean()
-            
             recent = stock_df.tail(20)
             total_amt = recent['成交额'].sum()
             total_vol = recent['成交量'].sum()
@@ -166,18 +157,14 @@ def get_stock_history_metrics(code):
                 avg_cost = total_amt / total_vol
                 if avg_cost > 200: avg_cost /= 100 
             else: avg_cost = 0
-            
             stock_df['is_zt'] = stock_df['涨跌幅'] > 9.5
             
-            # 1. 计算当前连板 (Current Streak)
             zt_count = 0
             check_df = stock_df.copy()
             for i in range(len(check_df)-1, -1, -1):
                 if check_df.iloc[i]['is_zt']: zt_count += 1
                 else: break
             
-            # 2. 🔥 计算过去15天内的最大连板高度 (Max Streak)
-            # 这就是"龙头记忆"：只要近期辉煌过，就不能当成杂毛
             recent_15_days = stock_df.tail(15)
             max_streak = 0
             current_streak_temp = 0
@@ -192,7 +179,6 @@ def get_stock_history_metrics(code):
         except: return None, 0, 0, False, 0
     return None, 0, 0, False, 0
 
-# 🧠 游资策略引擎 (逻辑大升级：引入 max_streak)
 def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt, max_streak):
     price = info['price']
     pre_close = info['pre_close']
@@ -201,47 +187,30 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt, max
     day_vwap = info['amount'] / info['vol'] if info['vol'] > 0 else price
     
     if history_df is None or history_df.empty: return "数据加载中...", "tag-wait"
-    
     try:
         ma5 = history_df.iloc[-1]['MA5']
         ma10 = history_df.iloc[-1]['MA10']
     except: return "数据错误", "tag-wait"
 
-    # --- 👑 优先级 1: 龙头/妖股判定 (身份压制) ---
-    # 逻辑：如果过去15天内有过4连板以上，它就是"龙"，哪怕今天断板也是"困龙"，不是"虫"
     if max_streak >= 4:
-        if zt_count > 0:
-            return f"🔥 妖股加速 ({zt_count}板)", "tag-dragon"
-        elif pct_chg > 5.0:
-            # 雷科防务这种情况会落在这里：曾6板，今断板但大涨 -> 龙头震荡
-            return "🦁 龙头震荡/二波", "tag-purple"
-        elif pct_chg < -5.0 and price > ma10:
-            return "🐲 龙头首阴(反核)", "tag-special"
-        elif price > day_vwap:
-            return "🦁 龙头承接", "tag-special"
-        else:
-            return "💀 龙头退潮", "tag-sell"
+        if zt_count > 0: return f"🔥 妖股加速 ({zt_count}板)", "tag-dragon"
+        elif pct_chg > 5.0: return "🦁 龙头震荡/二波", "tag-purple"
+        elif pct_chg < -5.0 and price > ma10: return "🐲 龙头首阴(反核)", "tag-special"
+        elif price > day_vwap: return "🦁 龙头承接", "tag-special"
+        else: return "💀 龙头退潮", "tag-sell"
 
-    # --- 优先级 2: 普通连板接力 ---
-    if zt_count >= 2:
-        return f"🚀 {zt_count}连板持筹", "tag-dragon"
-    
+    if zt_count >= 2: return f"🚀 {zt_count}连板持筹", "tag-dragon"
     if yesterday_zt and zt_count < 2:
         if 2 < pct_chg < 9.0 and price > day_vwap: return "🚀 1进2 接力", "tag-buy"
         if pct_chg > 9.0: return "🚀 秒板/一字", "tag-dragon"
     
-    # --- 优先级 3: 形态/趋势 ---
     high_pct = ((high - pre_close) / pre_close) * 100
     if high_pct > 7 and pct_chg < 3 and price > ma5: return "👆 仙人指路", "tag-special"
     
-    if pct_chg > 0 and price > day_vwap:
-        return "💪 趋势向上", "tag-wait"
-    if pct_chg < 0 and price < day_vwap:
-        return "🤢 弱势调整", "tag-wait"
-        
+    if pct_chg > 0 and price > day_vwap: return "💪 趋势向上", "tag-wait"
+    if pct_chg < 0 and price < day_vwap: return "🤢 弱势调整", "tag-wait"
     return "😴 观望", "tag-wait"
 
-# 并发预加载
 def prefetch_all_data(stock_codes):
     results = {}
     with ThreadPoolExecutor(max_workers=10) as executor:
@@ -261,10 +230,41 @@ st.sidebar.markdown(f"当前状态: <span style='color:{status_color};font-weigh
 
 if st.sidebar.button("🧹 强制刷新数据"):
     st.cache_data.clear()
-    st.toast("正在重新拉取数据...")
-    time.sleep(1)
     st.rerun()
-if st.button('🔄 全局刷新', type="primary"): st.rerun()
+
+# 🔥🔥🔥 核心新功能：数据备份与恢复 🔥🔥🔥
+st.sidebar.markdown("---")
+with st.sidebar.expander("📂 数据备份与恢复 (防止数据丢失)", expanded=False):
+    # 1. 下载按钮
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "rb") as f:
+            st.download_button(
+                label="⬇️ 下载配置备份 (CSV)",
+                data=f,
+                file_name=f"stock_backup_{datetime.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv",
+                help="代码更新前，请务必下载备份！"
+            )
+    
+    # 2. 上传恢复
+    uploaded_file = st.file_uploader("⬆️ 上传恢复备份", type=["csv"])
+    if uploaded_file is not None:
+        try:
+            # 读取上传的文件并覆盖本地文件
+            backup_df = pd.read_csv(uploaded_file, dtype={"code": str})
+            # 简单的格式校验
+            required_columns = ["code", "name", "group"]
+            if all(col in backup_df.columns for col in required_columns):
+                backup_df.to_csv(DATA_FILE, index=False)
+                st.success("✅ 数据恢复成功！正在刷新...")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.error("❌ 文件格式错误，请使用本系统导出的CSV")
+        except Exception as e:
+            st.error(f"❌ 恢复失败: {e}")
+
+st.sidebar.markdown("---")
 
 df = load_data()
 
@@ -284,7 +284,6 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
                     st.session_state.calc_s1 = round(2*pivot - last['最高'], 2)
                     st.session_state.calc_r2 = round(pivot + (last['最高'] - last['最低']), 2)
                     st.session_state.calc_s2 = round(pivot - (last['最高'] - last['最低']), 2)
-                    # 提示信息更加精准
                     status_text = f"当前{zt}连板" if zt > 0 else "断板"
                     high_status = f" (曾{max_streak}连板妖股)" if max_streak >= 4 else ""
                     st.success(f"识别结果：{status_text}{high_status}")
@@ -350,7 +349,6 @@ if not df.empty:
                 chg = ((price-pre)/pre)*100 if pre else 0
                 price_color = "price-up" if chg > 0 else ("price-down" if chg < 0 else "price-gray")
                 
-                # 🔥 传入 max_streak 参数
                 hist_df, cost_low, zt_count, yesterday_zt, max_streak = batch_strategy_data.get(code, (None, 0, 0, False, 0))
                 strategy_text, strategy_class = ai_strategy_engine(info, hist_df, cost_low, zt_count, yesterday_zt, max_streak)
                 
