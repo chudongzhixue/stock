@@ -7,7 +7,7 @@ import numpy as np
 import akshare as ak
 import yfinance as yf
 from datetime import datetime, timedelta, time as dt_time
-from concurrent.futures import ThreadPoolExecutor, as_completed # 🔥 引入多线程工具
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 页面基础设置 ---
 st.set_page_config(
@@ -40,12 +40,14 @@ st.markdown("""
         .stock-name { font-size: 1.1rem; font-weight: bold; color: #333; }
         .stock-code { font-size: 0.9rem; color: #999; margin-left: 5px; }
         
+        /* 策略标签优化 */
         .strategy-tag { padding: 3px 6px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white; display: inline-block; vertical-align: middle; margin-right: 5px; }
-        .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); }
+        .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); } /* 龙头红 */
         .tag-buy { background-color: #d9534f; }
         .tag-sell { background-color: #5cb85c; }
         .tag-wait { background-color: #999; }
-        .tag-special { background-color: #f0ad4e; }
+        .tag-special { background-color: #f0ad4e; } /* 橙色：特殊关注 */
+        .tag-purple { background: linear-gradient(45deg, #8e44ad, #c0392b); } /* 紫色：妖股二波 */
 
         .cost-range-box { background-color: #f8f9fa; border-left: 3px solid #666; padding: 3px 8px; margin: 8px 0; border-radius: 0 4px 4px 0; font-size: 0.85rem; color: #444; }
         
@@ -64,7 +66,7 @@ st.markdown("""
 
 DATA_FILE = 'my_stock_plan_v3.csv'
 
-# --- 🛠️ 核心功能函数 ---
+# --- 核心函数 ---
 
 def save_data(df):
     df.to_csv(DATA_FILE, index=False)
@@ -123,19 +125,17 @@ def get_realtime_quotes(code_list):
         return data
     except: return {}
 
-# 🔥 带缓存的数据获取函数 (不需要变)
+# 🔥 升级版数据获取：计算"历史最高连板"
 @st.cache_data(ttl=3600)
 def get_stock_history_metrics(code):
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
     stock_df = None
     
-    # 方案 A: Akshare
     try:
         stock_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
     except: pass
         
-    # 方案 B: Yahoo
     if stock_df is None or stock_df.empty:
         try:
             y_code = f"{code}.SS" if code.startswith('6') else f"{code}.SZ"
@@ -155,6 +155,7 @@ def get_stock_history_metrics(code):
             stock_df['MA5'] = stock_df['收盘'].rolling(5).mean()
             stock_df['MA10'] = stock_df['收盘'].rolling(10).mean()
             stock_df['MA20'] = stock_df['收盘'].rolling(20).mean()
+            
             recent = stock_df.tail(20)
             total_amt = recent['成交额'].sum()
             total_vol = recent['成交量'].sum()
@@ -164,19 +165,32 @@ def get_stock_history_metrics(code):
             else: avg_cost = 0
             
             stock_df['is_zt'] = stock_df['涨跌幅'] > 9.5
+            
+            # --- 🔥 关键算法升级：计算过去15天内的最大连板高度 ---
+            # 1. 当前连板数
             zt_count = 0
             check_df = stock_df.copy()
             for i in range(len(check_df)-1, -1, -1):
                 if check_df.iloc[i]['is_zt']: zt_count += 1
                 else: break
             
-            # 返回: 历史数据, 主力成本, 连板数, 昨天是否涨停
-            return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False
-        except: return None, 0, 0, False
-    return None, 0, 0, False
+            # 2. 历史最大连板 (龙头记忆)
+            recent_15_days = stock_df.tail(15)
+            max_streak = 0
+            current_streak = 0
+            for zt in recent_15_days['is_zt']:
+                if zt: current_streak += 1
+                else:
+                    max_streak = max(max_streak, current_streak)
+                    current_streak = 0
+            max_streak = max(max_streak, current_streak) # 最后一次检查
+            
+            return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False, max_streak
+        except: return None, 0, 0, False, 0
+    return None, 0, 0, False, 0
 
-# 🧠 游资策略引擎
-def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt):
+# 🧠 游资策略引擎 (逻辑大升级)
+def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt, max_streak):
     price = info['price']
     pre_close = info['pre_close']
     high = info['high']
@@ -188,34 +202,51 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt):
     try:
         ma5 = history_df.iloc[-1]['MA5']
         ma10 = history_df.iloc[-1]['MA10']
-        ma20 = history_df.iloc[-1]['MA20']
-        if pd.isna(ma5): return "计算中...", "tag-wait"
     except: return "数据错误", "tag-wait"
 
+    # --- 优先级 1: 妖股/龙头判定 ---
+    # 如果它是高标股(曾4连板以上)，即使断板了，也是龙头震荡，不是普通杂毛
+    if max_streak >= 4:
+        if zt_count > 0:
+            return f"🔥 妖股加速 ({zt_count}板)", "tag-dragon"
+        elif pct_chg > 5.0:
+            return "🦁 龙头震荡/二波", "tag-purple" # 雷科防务会落在这里
+        elif pct_chg < -5.0 and price > ma10:
+            return "🐲 龙头首阴(反核)", "tag-special"
+        elif price > day_vwap:
+            return "🦁 龙头承接", "tag-special"
+        else:
+            return "💀 龙头退潮", "tag-sell"
+
+    # --- 优先级 2: 连板接力 ---
     if zt_count >= 2:
-        if pct_chg > 9.5: return f"💎 {zt_count+1}板锁仓", "tag-dragon"
-        elif price > day_vwap and price > ma5: return f"🔥 妖股持筹 ({zt_count}板)", "tag-dragon"
-        elif price < ma5: return "💀 断板止盈", "tag-sell"
+        return f"🚀 {zt_count}连板持筹", "tag-dragon"
     
-    if yesterday_zt and zt_count < 3:
-        if 2 < pct_chg < 9.0 and price > day_vwap: return f"🚀 {zt_count}进{zt_count+1} 接力", "tag-buy"
+    if yesterday_zt and zt_count < 2:
+        if 2 < pct_chg < 9.0 and price > day_vwap: return "🚀 1进2 接力", "tag-buy"
+        if pct_chg > 9.0: return "🚀 秒板/一字", "tag-dragon"
     
-    if zt_count >= 3 and pct_chg < -3 and price > ma10: return "🐲 龙头首阴(反核)", "tag-special"
-    
+    # --- 优先级 3: 趋势/形态 ---
     high_pct = ((high - pre_close) / pre_close) * 100
-    if high_pct > 7 and pct_chg < 3 and price > ma20: return "👆 仙人指路", "tag-special"
+    if high_pct > 7 and pct_chg < 3 and price > ma5: return "👆 仙人指路", "tag-special"
     
-    if price > ma20 and ma10 > ma20:
-        dist_ma10 = abs(price - ma10) / ma10
-        if dist_ma10 < 0.02: return "🌊 MA10 低吸", "tag-buy"
-    
-    if pct_chg > 9.8: return "🚀 涨停持股", "tag-dragon"
-    if price > day_vwap: return "💪 强势整理", "tag-wait"
-    if price < day_vwap: return "👀 弱势观望", "tag-wait"
+    if pct_chg > 0 and price > day_vwap:
+        return "💪 趋势向上", "tag-wait"
+        
     return "😴 观望", "tag-wait"
 
-# --- 侧边栏 ---
-st.sidebar.title("Control Panel")
+def prefetch_all_data(stock_codes):
+    results = {}
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        future_to_code = {executor.submit(get_stock_history_metrics, code): code for code in stock_codes}
+        for future in as_completed(future_to_code):
+            code = future_to_code[future]
+            try: results[code] = future.result()
+            except: results[code] = (None, 0, 0, False, 0)
+    return results
+
+# --- 主界面 ---
+st.title("Alpha 游资系统")
 enable_refresh = st.sidebar.toggle("⚡ 智能实时刷新", value=True)
 trading_active, status_msg = is_trading_time()
 status_color = "green" if trading_active else "gray"
@@ -226,19 +257,19 @@ if st.sidebar.button("🧹 强制刷新数据"):
     st.toast("正在重新拉取数据...")
     time.sleep(1)
     st.rerun()
-st.sidebar.markdown("---")
+if st.button('🔄 全局刷新', type="primary"): st.rerun()
 
 df = load_data()
 
+# ... (添加个股部分代码与之前相同，略去重复以节省篇幅，保持逻辑一致) ...
 with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
     code_in = st.text_input("代码 (6位数)", key="cin").strip()
     if 'calc_s1' not in st.session_state: 
         for k in ['s1','s2','r1','r2']: st.session_state[f'calc_{k}'] = 0.0
-    
     if st.button("⚡ 智能计算支撑压力"):
         if code_in:
             with st.spinner("计算中..."):
-                hist, cost, zt, _ = get_stock_history_metrics(code_in)
+                hist, cost, zt, _, max_streak = get_stock_history_metrics(code_in)
                 if hist is not None:
                     last = hist.iloc[-1]
                     pivot = (last['最高']+last['最低']+last['收盘'])/3
@@ -246,8 +277,9 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
                     st.session_state.calc_s1 = round(2*pivot - last['最高'], 2)
                     st.session_state.calc_r2 = round(pivot + (last['最高'] - last['最低']), 2)
                     st.session_state.calc_s2 = round(pivot - (last['最高'] - last['最低']), 2)
-                    st.success(f"已识别：{zt}连板" if zt>=2 else "计算完成")
-                else: st.warning("数据获取稍慢，请稍后重试")
+                    # 提示信息升级
+                    tag_msg = f"{zt}连板" if zt>0 else (f"曾{max_streak}连板妖股" if max_streak>=3 else "普通趋势")
+                    st.success(f"识别结果：{tag_msg}")
     
     with st.form("add"):
         c1,c2=st.columns(2)
@@ -268,8 +300,6 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
             if code_in in df.code.values: df.loc[df.code==code_in, list(new.keys())]=list(new.values())
             else: df=pd.concat([df,pd.DataFrame([new])],ignore_index=True)
             save_data(df)
-            st.success(f"{code_in} 已保存")
-            time.sleep(0.5)
             st.rerun()
 
 @st.dialog("📈 个股详情", width="large")
@@ -280,32 +310,8 @@ def view_chart_modal(code, name):
     with t1: st.image(f"https://webquotepic.eastmoney.com/GetPic.aspx?nid={mid}.{code}&imageType=r&t={ts}", use_container_width=True)
     with t2: st.image(f"https://webquotepic.eastmoney.com/GetPic.aspx?nid={mid}.{code}&imageType=k&t={ts}", use_container_width=True)
 
-# --- 🔥 并发数据预加载 (极速优化核心) ---
-def prefetch_all_data(stock_codes):
-    results = {}
-    # 使用线程池并发抓取，最多同时开10个线程
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        # 提交所有任务
-        future_to_code = {executor.submit(get_stock_history_metrics, code): code for code in stock_codes}
-        # 等待任务完成
-        for future in as_completed(future_to_code):
-            code = future_to_code[future]
-            try:
-                data = future.result()
-                results[code] = data
-            except:
-                results[code] = (None, 0, 0, False)
-    return results
-
-# --- 主界面 ---
-st.title("Alpha 游资系统")
-if st.button('🔄 全局刷新', type="primary"): st.rerun()
-
 if not df.empty:
     quotes = get_realtime_quotes(df['code'].tolist())
-    
-    # 🔥 在循环开始前，一次性并发抓取所有策略数据！
-    # 这样页面加载时会有一个统一的等待，然后瞬间渲染出来，而不是一个个蹦。
     with st.spinner("🚀 正在极速分析游资数据..."):
         batch_strategy_data = prefetch_all_data(df['code'].unique().tolist())
 
@@ -336,9 +342,10 @@ if not df.empty:
                 chg = ((price-pre)/pre)*100 if pre else 0
                 price_color = "price-up" if chg > 0 else ("price-down" if chg < 0 else "price-gray")
                 
-                # 🔥 直接从预加载的字典里取数据，速度飞快！
-                hist_df, cost_low, zt_count, yesterday_zt = batch_strategy_data.get(code, (None, 0, 0, False))
-                strategy_text, strategy_class = ai_strategy_engine(info, hist_df, cost_low, zt_count, yesterday_zt)
+                # 🔥 获取包含 max_streak 的新数据
+                hist_df, cost_low, zt_count, yesterday_zt, max_streak = batch_strategy_data.get(code, (None, 0, 0, False, 0))
+                # 🔥 传入 max_streak 到策略引擎
+                strategy_text, strategy_class = ai_strategy_engine(info, hist_df, cost_low, zt_count, yesterday_zt, max_streak)
                 
                 with cols[j]:
                     with st.container(border=True):
