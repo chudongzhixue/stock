@@ -17,45 +17,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 🧠 核心功能：1进2 操盘推演生成器 (必须放在最前面！) ---
-def generate_1to2_plan(code, name, price, turnover, last_vol, pre_close):
-    """
-    为首板个股生成详细的次日操盘预案
-    """
-    plan = []
-    
-    # 基础参数估算
-    expected_open_low = pre_close * 1.02 # +2%
-    expected_open_high = pre_close * 1.06 # +6%
-    
-    # 竞价情绪判断标准
-    plan.append(f"**🗓️ 明日竞价关注点：**")
-    plan.append(f"- **竞价量能：** 需关注 9:25 分成交量是否大于今日成交量的 **10%** (约 {int(last_vol * 0.1 / 100)} 手)。")
-    plan.append(f"- **开盘位置：** 理想开盘价在 **{expected_open_low:.2f} ~ {expected_open_high:.2f}** ({2}%~{6}%)。")
-    
-    # 场景推演
-    plan.append(f"\n**🎲 走势推演与对策：**")
-    
-    # 场景1：弱转强（机会）
-    plan.append(f"1. **🔥 弱转强（买入点）：**\n   若高开 **>3%** 且竞价抢筹明显，开盘后 **5分钟内** 价格不破开盘价，且分时均线向上发散。\n   👉 **策略：** 半路跟随或打板确认。")
-    
-    # 场景2：不及预期（风险）
-    plan.append(f"2. **❄️ 不及预期（卖出点）：**\n   若低开 **<-2%** 或平开后迅速下杀跌破分时均线，且成交量稀疏。\n   👉 **策略：** 反抽均线无力时离场，不幻想。")
-    
-    # 场景3：加速一字（持股）
-    plan.append(f"3. **🚀 加速秒板：**\n   若竞价直接涨停或开盘 **9:31** 前秒板。\n   👉 **策略：** 只要封单不撤，坚定锁仓。")
-    
-    # 换手率建议
-    plan.append(f"\n**📊 量能监控：**")
-    plan.append(f"- 今日换手率 **{turnover:.2f}%**。")
-    if turnover > 0:
-        plan.append(f"- 明日最佳接力换手率预估：**{(turnover * 1.2):.2f}% - {(turnover * 1.5):.2f}%**。")
-        plan.append(f"- 若换手不足缩量涨停，次日风险极大；若换手过大(>{turnover*2}%)，警惕主力出货。")
-    else:
-        plan.append(f"- 换手率数据暂缺，请关注实际盘口承接。")
-    
-    return "\n".join(plan)
-
 # --- 🎨 CSS 样式 ---
 st.markdown("""
     <style>
@@ -177,7 +138,38 @@ def get_realtime_quotes(code_list):
         return data
     except: return {}
 
-# 🔥 获取历史数据 (增加换手率计算)
+# --- 🔥 核心：1进2 操盘推演生成器 (确保定义在这里！) ---
+def generate_1to2_plan(code, name, price, turnover, last_vol, pre_close):
+    """为首板个股生成详细的次日操盘预案"""
+    plan = []
+    
+    # 基础参数估算 (假设)
+    expected_vol = last_vol * 1.2 # 预期放量 20%
+    expected_open_low = pre_close * 1.02 # 2%
+    expected_open_high = pre_close * 1.06 # 6%
+    
+    # 竞价情绪
+    plan.append(f"**🗓️ 明日竞价关注点：**")
+    plan.append(f"- **理想开盘：** **{expected_open_low:.2f} ~ {expected_open_high:.2f}** ({2}%~{6}%)。")
+    plan.append(f"- **竞价量能：** 需大于今日成交量的 **10%** 才有溢价。")
+    
+    # 场景推演
+    plan.append(f"\n**🎲 走势推演：**")
+    plan.append(f"1. **🔥 弱转强(机会)：** 高开 **>3%**，开盘5分钟不破均线。👉 **策略：** 半路/打板。")
+    plan.append(f"2. **❄️ 不及预期(风险)：** 低开或平开下杀。👉 **策略：** 反抽无力离场。")
+    plan.append(f"3. **🚀 加速秒板：** 竞价/开盘直接涨停。👉 **策略：** 锁仓。")
+    
+    # 换手率建议
+    plan.append(f"\n**📊 量能监控：**")
+    if turnover > 0:
+        plan.append(f"- 今日换手 **{turnover:.2f}%**。")
+        plan.append(f"- 明日接力安全换手预估：**{(turnover * 1.2):.2f}%+**。")
+    else:
+        plan.append(f"- (换手率数据暂缺，请参考分时量能)")
+    
+    return "\n".join(plan)
+
+# 🔥 获取历史数据
 @st.cache_data(ttl=3600)
 def get_stock_history_metrics(code):
     end_date = datetime.now().strftime("%Y%m%d")
@@ -199,7 +191,7 @@ def get_stock_history_metrics(code):
                 y_data.rename(columns={'Date': '日期', 'Open': '开盘', 'High': '最高', 'Low': '最低', 'Close': '收盘', 'Volume': '成交量'}, inplace=True)
                 y_data['涨跌幅'] = y_data['收盘'].pct_change() * 100
                 y_data['成交额'] = y_data['收盘'] * y_data['成交量'] 
-                y_data['换手率'] = 0 # Yahoo没有换手率，暂设0
+                y_data['换手率'] = 0 
                 stock_df = y_data
         except: pass
 
@@ -234,16 +226,14 @@ def get_stock_history_metrics(code):
                     current_streak_temp = 0
             max_streak = max(max_streak, current_streak_temp)
             
-            # 获取最新一天的换手率
             last_turnover = stock_df.iloc[-1]['换手率'] if '换手率' in stock_df.columns else 0
             last_vol = stock_df.iloc[-1]['成交量']
             
-            # 返回 7 个值
             return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False, max_streak, last_turnover, last_vol
         except: return None, 0, 0, False, 0, 0, 0
     return None, 0, 0, False, 0, 0, 0
 
-# 🧠 策略引擎 (逻辑更新：首板识别)
+# 🧠 策略引擎
 def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt, max_streak):
     price = info['price']
     pre_close = info['pre_close']
@@ -258,25 +248,22 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt, max
         ma10 = history_df.iloc[-1]['MA10']
     except: return "数据错误", "tag-wait"
 
-    # 1. 妖股判定
     if max_streak >= 4:
         if zt_count > 0: return f"🔥 妖股加速 ({zt_count}板)", "tag-dragon"
         elif pct_chg > 5.0: return "🦁 龙头震荡/二波", "tag-purple"
         elif pct_chg < -5.0 and price > ma10: return "🐲 龙头首阴(反核)", "tag-special"
         else: return "💀 龙头退潮", "tag-sell"
 
-    # 2. 连板接力
     if zt_count >= 2: return f"🚀 {zt_count}连板持筹", "tag-dragon"
     
-    # 🔥 核心修正：首板识别 (昨日没涨停，今日涨停)
+    # 首板识别
     if not yesterday_zt and pct_chg > 9.5:
-        return "🚀 首板启动", "tag-first" # 专门的橙色标签
+        return "🚀 首板启动", "tag-first"
     
     if yesterday_zt and zt_count < 2:
         if 2 < pct_chg < 9.0 and price > day_vwap: return "🚀 1进2 接力", "tag-buy"
         if pct_chg > 9.0: return "🚀 秒板/一字", "tag-dragon"
     
-    # 3. 形态
     high_pct = ((high - pre_close) / pre_close) * 100
     if high_pct > 7 and pct_chg < 3 and price > ma5: return "👆 仙人指路", "tag-special"
     
@@ -434,13 +421,16 @@ if not df.empty:
                         # 策略标签
                         st.markdown(f"<div style='margin-bottom:8px'><span class='strategy-tag {strategy_class}'>{strategy_text}</span></div>", unsafe_allow_html=True)
                         
-                        # 🔥🔥🔥 首板 1进2 预案推演 (核心新功能) 🔥🔥🔥
+                        # 🔥🔥🔥 首板 1进2 预案推演 (核心修复：增加容错) 🔥🔥🔥
                         if strategy_text == "🚀 首板启动":
-                            with st.expander("🎲 点击查看：1进2 操盘预案", expanded=True):
-                                # 这里调用了最上面定义的 generate_1to2_plan 函数
-                                plan_text = generate_1to2_plan(code, name, price, turnover, last_vol, pre_close)
-                                st.markdown(plan_text)
-                        
+                            try:
+                                with st.expander("🎲 点击查看：1进2 操盘预案", expanded=True):
+                                    plan_text = generate_1to2_plan(code, name, price, turnover, last_vol, pre)
+                                    st.markdown(plan_text)
+                            except:
+                                # 万一数据不足算不出来，只显示一个简单提示，不让程序崩
+                                st.caption("⚠️ 历史数据不足，暂无法生成详细预案")
+
                         if cost_low > 0: st.markdown(f"<div class='cost-range-box'>主力成本: {cost_low:.2f}</div>", unsafe_allow_html=True)
                         
                         # S/R
