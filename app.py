@@ -455,7 +455,8 @@ if not df.empty:
                                         df.loc[df.code==code,'group']=new_grp
                                         save_data(df)
                                         st.rerun()
-                        with c_del_btn: # Fixed variable name here from c3 to col_del_btn context
+                        # 🔥🔥🔥 修复变量名拼写错误 🔥🔥🔥
+                        with col_del_btn: 
                              if st.button("🗑️", key=f"d_{code}"):
                                 delete_single_stock(code)
                                 st.rerun()
