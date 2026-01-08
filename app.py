@@ -38,8 +38,9 @@ st.markdown("""
         .stock-name { font-size: 1.1rem; font-weight: bold; color: #333; }
         .stock-code { font-size: 0.9rem; color: #999; margin-left: 5px; }
         
+        /* 策略标签颜色定义 */
         .strategy-tag { padding: 3px 6px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white; display: inline-block; vertical-align: middle; margin-right: 5px; }
-        .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); }
+        .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); } /* 龙头红 */
         .tag-buy { background-color: #d9534f; }
         .tag-sell { background-color: #5cb85c; }
         .tag-wait { background-color: #999; }
@@ -73,29 +74,17 @@ def load_data():
         df = pd.DataFrame(columns=["code", "name", "s1", "s2", "r1", "r2", "group", "note"])
         df.to_csv(DATA_FILE, index=False)
         return df
-    
-    # 强制将 'code' 读取为字符串
     df = pd.read_csv(DATA_FILE, dtype={"code": str})
-    
     expected_cols = ["code", "name", "s1", "s2", "r1", "r2", "group", "note"]
     for col in expected_cols:
         if col not in df.columns: df[col] = 0.0
     df = df[expected_cols]
-    
-    # 🔥 强力去重逻辑 (清洗数据)
-    # 1. 移除代码两端的空格
     df['code'] = df['code'].str.strip()
-    # 2. 检查是否有重复，保留最后一条
     initial_count = len(df)
     df.drop_duplicates(subset=['code'], keep='last', inplace=True)
-    
-    # 3. 如果发现有垃圾数据被清理了，立刻保存回文件，确保持久化
-    if len(df) < initial_count:
-        save_data(df)
-        
+    if len(df) < initial_count: save_data(df)
     return df
 
-# 删除功能
 def delete_single_stock(code_to_delete):
     df = load_data()
     if code_to_delete in df['code'].values:
@@ -104,25 +93,15 @@ def delete_single_stock(code_to_delete):
         return True
     return False
 
-# 🔥 判断是否为交易时间 (智能刷新核心)
+# 🔥 判断交易时间
 def is_trading_time():
     now = datetime.now()
-    # 1. 判断是否为周末 (0=周一, 6=周日)
-    if now.weekday() >= 5: 
-        return False, "周末休市"
-    
+    if now.weekday() >= 5: return False, "周末休市"
     current_time = now.time()
-    # 2. 定义交易时间段
-    # 上午: 9:15 (含集合竞价) - 11:30
-    am_start = dt_time(9, 15)
-    am_end = dt_time(11, 30)
-    # 下午: 13:00 - 15:00
-    pm_start = dt_time(13, 0)
-    pm_end = dt_time(15, 0)
-    
+    am_start, am_end = dt_time(9, 15), dt_time(11, 30)
+    pm_start, pm_end = dt_time(13, 0), dt_time(15, 0)
     if (am_start <= current_time <= am_end) or (pm_start <= current_time <= pm_end):
         return True, "交易中"
-    
     return False, "非交易时间"
 
 def get_realtime_quotes(code_list):
@@ -145,38 +124,44 @@ def get_realtime_quotes(code_list):
         return data
     except: return {}
 
+# 🔥 数据获取增强版 (带重试机制)
 @st.cache_data(ttl=3600)
 def get_stock_history_metrics(code):
-    try:
-        end_date = datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
+    # 尝试 3 次，防止网络抖动导致的“数据不足”
+    for attempt in range(3):
         try:
+            end_date = datetime.now().strftime("%Y%m%d")
+            start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
             stock_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
-        except: return None, 0, 0, 0
-        if stock_df.empty: return None, 0, 0, 0
-        
-        stock_df['MA5'] = stock_df['收盘'].rolling(5).mean()
-        stock_df['MA10'] = stock_df['收盘'].rolling(10).mean()
-        stock_df['MA20'] = stock_df['收盘'].rolling(20).mean()
-        
-        recent = stock_df.tail(20)
-        total_amt = recent['成交额'].sum()
-        total_vol = recent['成交量'].sum()
-        smart_cost = total_amt / (total_vol * 100) if total_vol > 0 else 0
-        
-        stock_df['is_zt'] = stock_df['涨跌幅'] > 9.5
-        zt_count = 0
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        check_df = stock_df.copy()
-        if str(check_df.iloc[-1]['日期']) == today_str:
-            check_df = check_df.iloc[:-1]
-        for i in range(len(check_df)-1, -1, -1):
-            if check_df.iloc[i]['is_zt']: zt_count += 1
-            else: break
-        return stock_df, smart_cost, zt_count, check_df.iloc[-1]['is_zt'] if not check_df.empty else False
-    except:
-        return None, 0, 0, 0
+            
+            if stock_df is not None and not stock_df.empty:
+                stock_df['MA5'] = stock_df['收盘'].rolling(5).mean()
+                stock_df['MA10'] = stock_df['收盘'].rolling(10).mean()
+                stock_df['MA20'] = stock_df['收盘'].rolling(20).mean()
+                
+                recent = stock_df.tail(20)
+                total_amt = recent['成交额'].sum()
+                total_vol = recent['成交量'].sum()
+                smart_cost = total_amt / (total_vol * 100) if total_vol > 0 else 0
+                
+                stock_df['is_zt'] = stock_df['涨跌幅'] > 9.5
+                zt_count = 0
+                today_str = datetime.now().strftime("%Y-%m-%d")
+                check_df = stock_df.copy()
+                if str(check_df.iloc[-1]['日期']) == today_str:
+                    check_df = check_df.iloc[:-1]
+                for i in range(len(check_df)-1, -1, -1):
+                    if check_df.iloc[i]['is_zt']: zt_count += 1
+                    else: break
+                
+                return stock_df, smart_cost, zt_count, check_df.iloc[-1]['is_zt']
+        except:
+            time.sleep(0.5) # 失败等待0.5秒重试
+            continue
+            
+    return None, 0, 0, False # 3次都失败才放弃
 
+# 🧠 游资策略引擎 (逻辑全部保留！)
 def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt):
     price = info['price']
     pre_close = info['pre_close']
@@ -184,23 +169,36 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt):
     pct_chg = ((price - pre_close) / pre_close) * 100
     day_vwap = info['amount'] / info['vol'] if info['vol'] > 0 else price
     
-    if history_df is None or history_df.empty: return "数据不足", "tag-wait"
+    # 如果没有历史数据，只能返回数据不足
+    if history_df is None or history_df.empty: return "数据不足(刷新重试)", "tag-wait"
+    
     ma5 = history_df.iloc[-1]['MA5']
     ma10 = history_df.iloc[-1]['MA10']
     ma20 = history_df.iloc[-1]['MA20']
 
+    # 1. 妖股/连板锁仓
     if zt_count >= 2:
         if pct_chg > 9.5: return f"💎 {zt_count+1}板锁仓", "tag-dragon"
         elif price > day_vwap and price > ma5: return f"🔥 妖股持筹 ({zt_count}板)", "tag-dragon"
         elif price < ma5: return "💀 断板止盈", "tag-sell"
+    
+    # 2. 连板接力
     if yesterday_zt and zt_count < 3:
         if 2 < pct_chg < 9.0 and price > day_vwap: return f"🚀 {zt_count}进{zt_count+1} 接力", "tag-buy"
-    if zt_count >= 3 and pct_chg < -3 and price > ma10: return "🐲 龙头首阴", "tag-special"
+    
+    # 3. 龙头首阴
+    if zt_count >= 3 and pct_chg < -3 and price > ma10: return "🐲 龙头首阴(反核)", "tag-special"
+    
+    # 4. 仙人指路
     high_pct = ((high - pre_close) / pre_close) * 100
     if high_pct > 7 and pct_chg < 3 and price > ma20: return "👆 仙人指路", "tag-special"
+    
+    # 5. 趋势低吸
     if price > ma20 and ma10 > ma20:
         dist_ma10 = abs(price - ma10) / ma10
         if dist_ma10 < 0.02: return "🌊 MA10 低吸", "tag-buy"
+    
+    # 6. 常规状态
     if pct_chg > 9.8: return "🚀 涨停持股", "tag-dragon"
     if price > day_vwap: return "💪 强势整理", "tag-wait"
     if price < day_vwap: return "👀 弱势观望", "tag-wait"
@@ -209,22 +207,25 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt):
 # --- 侧边栏 ---
 st.sidebar.title("Control Panel")
 
-# 🔥 智能刷新开关
+# 智能刷新开关
 enable_refresh = st.sidebar.toggle("⚡ 智能实时刷新", value=True, help="仅在交易时段(9:15-11:30, 13:00-15:00)自动刷新")
-
-# 显示当前交易状态
 trading_active, status_msg = is_trading_time()
 status_color = "green" if trading_active else "gray"
 st.sidebar.markdown(f"当前状态: <span style='color:{status_color};font-weight:bold'>{status_msg}</span>", unsafe_allow_html=True)
+
+# 🔥 缓存清理按钮 (救命稻草)
+if st.sidebar.button("🧹 清除数据缓存", help="如果策略显示'数据不足'，点此强制刷新"):
+    st.cache_data.clear()
+    st.toast("缓存已清理，正在重新拉取数据...")
+    time.sleep(1)
+    st.rerun()
 
 st.sidebar.markdown("---")
 
 df = load_data()
 
 with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
-    # 🔥 自动去空格，防止手误产生重复
     code_in = st.text_input("代码 (6位数)", key="cin").strip()
-    
     if 'calc_s1' not in st.session_state: 
         for k in ['s1','s2','r1','r2']: st.session_state[f'calc_{k}'] = 0.0
     
@@ -308,6 +309,8 @@ if not df.empty:
                 pre = info.get('pre_close', 0)
                 chg = ((price-pre)/pre)*100 if pre else 0
                 price_color = "price-up" if chg > 0 else ("price-down" if chg < 0 else "price-gray")
+                
+                # 🔥 获取数据 & 策略计算
                 hist_df, cost_low, zt_count, yesterday_zt = get_stock_history_metrics(code)
                 strategy_text, strategy_class = ai_strategy_engine(info, hist_df, cost_low, zt_count, yesterday_zt)
                 
@@ -334,7 +337,10 @@ if not df.empty:
                         st.markdown(f"<div class='big-price {price_color}'>{price:.2f}</div>", unsafe_allow_html=True)
                         zt_badge = f"<span style='background:#ff0000;color:white;padding:1px 4px;border-radius:3px;font-size:0.8rem;margin-left:5px'>{zt_count}连板</span>" if zt_count>=2 else ""
                         st.markdown(f"<div style='font-weight:bold; margin-bottom:8px;'>{chg:+.2f}% {zt_badge}</div>", unsafe_allow_html=True)
+                        
+                        # 🔥 策略标签
                         st.markdown(f"<div style='margin-bottom:8px'><span class='strategy-tag {strategy_class}'>{strategy_text}</span></div>", unsafe_allow_html=True)
+                        
                         if cost_low > 0: st.markdown(f"<div class='cost-range-box'>主力成本: {cost_low:.2f}</div>", unsafe_allow_html=True)
                         
                         r1, r2 = float(row['r1']), float(row['r2'])
@@ -353,7 +359,6 @@ if not df.empty:
                         st.markdown('</div>', unsafe_allow_html=True)
 else: st.info("👈 请在左侧添加股票")
 
-# 🔥 核心修正：智能刷新逻辑
 if enable_refresh and trading_active:
     time.sleep(3)
     st.rerun()
