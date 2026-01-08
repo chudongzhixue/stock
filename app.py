@@ -55,7 +55,6 @@ st.markdown("""
         .sr-block { padding-top: 8px; border-top: 1px dashed #eee; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
         .sr-item { font-size: 0.9rem; font-weight: bold; color: #555; }
         
-        /* 按钮组样式 */
         [data-testid="column"] .stButton button { padding: 0px 8px; min-height: 0px; height: 32px; border: none; background: transparent; font-size: 1.1rem; color: #888; transition: all 0.2s; }
         button[kind="secondary"]:hover { color: #d9534f !important; background: #fff5f5 !important; }
         div[data-testid="stPopover"] button { padding: 0px 8px; min-height: 0px; height: 32px; border: none; background: transparent; font-size: 1.1rem; color: #888; }
@@ -63,17 +62,6 @@ st.markdown("""
         
         .view-chart-btn button { width: 100%; border-radius: 4px; font-weight: bold; margin-top: 8px; background-color: #f0f2f6; color: #31333F; height: auto; padding: 0.5rem; }
         .view-chart-btn button:hover { background-color: #e0e2e6; }
-
-        /* 策略推演框样式 */
-        .plan-box {
-            background-color: #fffbf0; 
-            border: 1px solid #ffeeba; 
-            border-radius: 6px; 
-            padding: 10px; 
-            margin-top: 10px;
-            font-size: 0.9rem;
-            color: #555;
-        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -138,34 +126,44 @@ def get_realtime_quotes(code_list):
         return data
     except: return {}
 
-# --- 🔥 核心：1进2 操盘推演生成器 (确保定义在这里！) ---
-def generate_1to2_plan(code, name, price, turnover, last_vol, pre_close):
-    """为首板个股生成详细的次日操盘预案"""
+# --- 🔥 核心：1进2 操盘推演生成器 (精准修复版) ---
+def generate_1to2_plan(code, name, price, turnover, last_vol):
+    """
+    price: 今日收盘价 (涨停价)
+    last_vol: 今日成交量 (手)
+    """
     plan = []
     
-    # 基础参数估算 (假设)
-    expected_vol = last_vol * 1.2 # 预期放量 20%
-    expected_open_low = pre_close * 1.02 # 2%
-    expected_open_high = pre_close * 1.06 # 6%
+    # 1. 价格修正：基于【今日收盘价】计算明日预期
+    expected_open_low = price * 1.02 # 高开2%
+    expected_open_high = price * 1.05 # 高开5%
     
-    # 竞价情绪
-    plan.append(f"**🗓️ 明日竞价关注点：**")
-    plan.append(f"- **理想开盘：** **{expected_open_low:.2f} ~ {expected_open_high:.2f}** ({2}%~{6}%)。")
-    plan.append(f"- **竞价量能：** 需大于今日成交量的 **10%** 才有溢价。")
+    # 2. 量能计算：精准量化
+    # 竞价量能通常要求达到全天量的 8% - 12% 视为弱转强或承接有力
+    target_vol_low = last_vol * 0.08
+    target_vol_high = last_vol * 0.12
     
-    # 场景推演
-    plan.append(f"\n**🎲 走势推演：**")
-    plan.append(f"1. **🔥 弱转强(机会)：** 高开 **>3%**，开盘5分钟不破均线。👉 **策略：** 半路/打板。")
-    plan.append(f"2. **❄️ 不及预期(风险)：** 低开或平开下杀。👉 **策略：** 反抽无力离场。")
-    plan.append(f"3. **🚀 加速秒板：** 竞价/开盘直接涨停。👉 **策略：** 锁仓。")
-    
-    # 换手率建议
-    plan.append(f"\n**📊 量能监控：**")
+    # 格式化量能单位 (万手)
+    def fmt_vol(v):
+        if v > 10000: return f"{v/10000:.1f}万手"
+        else: return f"{v:.0f}手"
+
+    plan.append(f"**🗓️ 明日竞价(9:15-9:25) 关键指标：**")
+    plan.append(f"- **🎯 理想开盘价：** **{expected_open_low:.2f} ~ {expected_open_high:.2f}** (+2%~+5%)。")
+    plan.append(f"- **📊 竞价爆量目标：** 需达到 **{fmt_vol(target_vol_low)} ~ {fmt_vol(target_vol_high)}**。")
+    plan.append(f"  *(注：若竞价量能 < {fmt_vol(target_vol_low)}，说明资金关注度不够，谨慎接力)*")
+
+    # 3. 场景推演
+    plan.append(f"\n**🎲 剧本推演：**")
+    plan.append(f"1. **🔥 弱转强 (S级机会)：**\n   - **特征：** 高开 >3%，竞价量能达标，开盘5分钟不下破分时均线。\n   - **操作：** 半路跟随 / 上板确认。")
+    plan.append(f"2. **❄️ 不及预期 (风险)：**\n   - **特征：** 平开或低开，竞价无量，开盘后迅速跌破分时均线。\n   - **操作：** 严禁低吸，反抽无力即清仓。")
+    plan.append(f"3. **🚀 缩量一字：**\n   - **特征：** 竞价直接封死涨停，封单金额 > {(price * last_vol * 0.1 / 10000):.0f}万。\n   - **操作：** 持股不动。")
+
+    # 4. 换手率建议
+    plan.append(f"\n**⚖️ 换手承接：**")
     if turnover > 0:
-        plan.append(f"- 今日换手 **{turnover:.2f}%**。")
-        plan.append(f"- 明日接力安全换手预估：**{(turnover * 1.2):.2f}%+**。")
-    else:
-        plan.append(f"- (换手率数据暂缺，请参考分时量能)")
+        plan.append(f"- 今日换手：**{turnover:.2f}%**")
+        plan.append(f"- 明日安全接力换手：**{(turnover * 1.1):.2f}% - {(turnover * 1.3):.2f}%** (需充分换手)。")
     
     return "\n".join(plan)
 
@@ -256,7 +254,6 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt, max
 
     if zt_count >= 2: return f"🚀 {zt_count}连板持筹", "tag-dragon"
     
-    # 首板识别
     if not yesterday_zt and pct_chg > 9.5:
         return "🚀 首板启动", "tag-first"
     
@@ -421,14 +418,14 @@ if not df.empty:
                         # 策略标签
                         st.markdown(f"<div style='margin-bottom:8px'><span class='strategy-tag {strategy_class}'>{strategy_text}</span></div>", unsafe_allow_html=True)
                         
-                        # 🔥🔥🔥 首板 1进2 预案推演 (核心修复：增加容错) 🔥🔥🔥
+                        # 🔥 首板预案
                         if strategy_text == "🚀 首板启动":
                             try:
                                 with st.expander("🎲 点击查看：1进2 操盘预案", expanded=True):
-                                    plan_text = generate_1to2_plan(code, name, price, turnover, last_vol, pre)
+                                    # 🔥 核心修正：使用 price (今日收盘价) 而不是 pre_close
+                                    plan_text = generate_1to2_plan(code, name, price, turnover, last_vol)
                                     st.markdown(plan_text)
                             except:
-                                # 万一数据不足算不出来，只显示一个简单提示，不让程序崩
                                 st.caption("⚠️ 历史数据不足，暂无法生成详细预案")
 
                         if cost_low > 0: st.markdown(f"<div class='cost-range-box'>主力成本: {cost_low:.2f}</div>", unsafe_allow_html=True)
