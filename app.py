@@ -5,7 +5,8 @@ import os
 import time
 import numpy as np
 import akshare as ak
-from datetime import datetime, time as dt_time
+import yfinance as yf # 引入备用数据源
+from datetime import datetime, timedelta, time as dt_time
 
 # --- 页面基础设置 ---
 st.set_page_config(
@@ -38,9 +39,8 @@ st.markdown("""
         .stock-name { font-size: 1.1rem; font-weight: bold; color: #333; }
         .stock-code { font-size: 0.9rem; color: #999; margin-left: 5px; }
         
-        /* 策略标签颜色定义 */
         .strategy-tag { padding: 3px 6px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white; display: inline-block; vertical-align: middle; margin-right: 5px; }
-        .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); } /* 龙头红 */
+        .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); }
         .tag-buy { background-color: #d9534f; }
         .tag-sell { background-color: #5cb85c; }
         .tag-wait { background-color: #999; }
@@ -51,7 +51,6 @@ st.markdown("""
         .sr-block { padding-top: 6px; border-top: 1px dashed #eee; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
         .sr-item { font-size: 0.85rem; font-weight: bold; color: #555; }
         
-        /* 按钮组样式 */
         [data-testid="column"] .stButton button { padding: 0px 8px; min-height: 0px; height: 32px; border: none; background: transparent; font-size: 1.1rem; color: #888; transition: all 0.2s; }
         button[kind="secondary"]:hover { color: #d9534f !important; background: #fff5f5 !important; }
         div[data-testid="stPopover"] button { padding: 0px 8px; min-height: 0px; height: 32px; border: none; background: transparent; font-size: 1.1rem; color: #888; }
@@ -93,7 +92,6 @@ def delete_single_stock(code_to_delete):
         return True
     return False
 
-# 🔥 判断交易时间
 def is_trading_time():
     now = datetime.now()
     if now.weekday() >= 5: return False, "周末休市"
@@ -124,44 +122,80 @@ def get_realtime_quotes(code_list):
         return data
     except: return {}
 
-# 🔥 数据获取增强版 (带重试机制)
+# 🔥 双引擎数据获取 (Akshare + Yahoo备用)
 @st.cache_data(ttl=3600)
 def get_stock_history_metrics(code):
-    # 尝试 3 次，防止网络抖动导致的“数据不足”
-    for attempt in range(3):
+    end_date = datetime.now().strftime("%Y%m%d")
+    start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
+    
+    stock_df = None
+    
+    # 🌟 方案 A: 尝试国内 Akshare (可能会在国外服务器超时)
+    try:
+        stock_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+    except:
+        pass # 失败了不报错，直接去方案B
+        
+    # 🌟 方案 B: 如果 A 失败，切换到 Yahoo Finance (国外服务器速度快)
+    if stock_df is None or stock_df.empty:
         try:
-            end_date = datetime.now().strftime("%Y%m%d")
-            start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
-            stock_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+            # 转换代码格式：600xxx -> 600xxx.SS, 000xxx/300xxx -> .SZ
+            y_code = f"{code}.SS" if code.startswith('6') else f"{code}.SZ"
+            if code.startswith(('8', '4')): y_code = f"{code}.BJ" # 北交所
             
-            if stock_df is not None and not stock_df.empty:
-                stock_df['MA5'] = stock_df['收盘'].rolling(5).mean()
-                stock_df['MA10'] = stock_df['收盘'].rolling(10).mean()
-                stock_df['MA20'] = stock_df['收盘'].rolling(20).mean()
-                
-                recent = stock_df.tail(20)
-                total_amt = recent['成交额'].sum()
-                total_vol = recent['成交量'].sum()
-                smart_cost = total_amt / (total_vol * 100) if total_vol > 0 else 0
-                
-                stock_df['is_zt'] = stock_df['涨跌幅'] > 9.5
-                zt_count = 0
-                today_str = datetime.now().strftime("%Y-%m-%d")
-                check_df = stock_df.copy()
-                if str(check_df.iloc[-1]['日期']) == today_str:
-                    check_df = check_df.iloc[:-1]
-                for i in range(len(check_df)-1, -1, -1):
-                    if check_df.iloc[i]['is_zt']: zt_count += 1
-                    else: break
-                
-                return stock_df, smart_cost, zt_count, check_df.iloc[-1]['is_zt']
+            # 下载数据
+            y_data = yf.download(y_code, period="3mo", progress=False)
+            if not y_data.empty:
+                # 格式化成和 Akshare 一样的列名，方便后续计算
+                y_data = y_data.reset_index()
+                y_data.columns = ['日期', '开盘', '最高', '最低', '收盘', '成交量'] if len(y_data.columns)==6 else y_data.columns
+                # 简单重命名
+                y_data.rename(columns={'Date': '日期', 'Open': '开盘', 'High': '最高', 'Low': '最低', 'Close': '收盘', 'Volume': '成交量'}, inplace=True)
+                # 计算涨跌幅 (Yahoo不直接提供，需计算)
+                y_data['涨跌幅'] = y_data['收盘'].pct_change() * 100
+                # 估算成交额 (Yahoo有时不准，用收盘*成交量粗算)
+                y_data['成交额'] = y_data['收盘'] * y_data['成交量'] 
+                stock_df = y_data
         except:
-            time.sleep(0.5) # 失败等待0.5秒重试
-            continue
-            
-    return None, 0, 0, False # 3次都失败才放弃
+            pass
 
-# 🧠 游资策略引擎 (逻辑全部保留！)
+    # 🔥 统一计算指标
+    if stock_df is not None and not stock_df.empty:
+        try:
+            stock_df['MA5'] = stock_df['收盘'].rolling(5).mean()
+            stock_df['MA10'] = stock_df['收盘'].rolling(10).mean()
+            stock_df['MA20'] = stock_df['收盘'].rolling(20).mean()
+            
+            recent = stock_df.tail(20)
+            total_amt = recent['成交额'].sum()
+            total_vol = recent['成交量'].sum()
+            # 注意：Yahoo的数据单位已经是股，不需要*100；Akshare是手，需要*100
+            # 这里的兼容性处理比较复杂，我们做一个简单的容错：
+            if total_vol > 0:
+                avg_cost = total_amt / total_vol
+                # 如果算出来成本特别大(几千)，说明是按手算的，除以100
+                if avg_cost > 200: avg_cost /= 100 
+            else:
+                avg_cost = 0
+            
+            stock_df['is_zt'] = stock_df['涨跌幅'] > 9.5
+            zt_count = 0
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            # 简单判断，不纠结时区，取最后一行
+            check_df = stock_df.copy()
+            
+            for i in range(len(check_df)-1, -1, -1):
+                if check_df.iloc[i]['is_zt']: zt_count += 1
+                else: break
+            
+            # 返回: 历史数据, 主力成本, 连板数, 昨天是否涨停
+            return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False
+        except:
+            return None, 0, 0, False
+
+    return None, 0, 0, False
+
+# 🧠 游资策略引擎
 def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt):
     price = info['price']
     pre_close = info['pre_close']
@@ -169,12 +203,15 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt):
     pct_chg = ((price - pre_close) / pre_close) * 100
     day_vwap = info['amount'] / info['vol'] if info['vol'] > 0 else price
     
-    # 如果没有历史数据，只能返回数据不足
-    if history_df is None or history_df.empty: return "数据不足(刷新重试)", "tag-wait"
+    if history_df is None or history_df.empty: return "数据不足(网络波动)", "tag-wait"
     
-    ma5 = history_df.iloc[-1]['MA5']
-    ma10 = history_df.iloc[-1]['MA10']
-    ma20 = history_df.iloc[-1]['MA20']
+    # 获取最后有效均线
+    try:
+        ma5 = history_df.iloc[-1]['MA5']
+        ma10 = history_df.iloc[-1]['MA10']
+        ma20 = history_df.iloc[-1]['MA20']
+        if pd.isna(ma5): return "数据计算中", "tag-wait"
+    except: return "数据错误", "tag-wait"
 
     # 1. 妖股/连板锁仓
     if zt_count >= 2:
@@ -207,16 +244,14 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt):
 # --- 侧边栏 ---
 st.sidebar.title("Control Panel")
 
-# 智能刷新开关
-enable_refresh = st.sidebar.toggle("⚡ 智能实时刷新", value=True, help="仅在交易时段(9:15-11:30, 13:00-15:00)自动刷新")
+enable_refresh = st.sidebar.toggle("⚡ 智能实时刷新", value=True)
 trading_active, status_msg = is_trading_time()
 status_color = "green" if trading_active else "gray"
 st.sidebar.markdown(f"当前状态: <span style='color:{status_color};font-weight:bold'>{status_msg}</span>", unsafe_allow_html=True)
 
-# 🔥 缓存清理按钮 (救命稻草)
-if st.sidebar.button("🧹 清除数据缓存", help="如果策略显示'数据不足'，点此强制刷新"):
+if st.sidebar.button("🧹 强制刷新数据 (启用备用源)"):
     st.cache_data.clear()
-    st.toast("缓存已清理，正在重新拉取数据...")
+    st.toast("正在切换至 Yahoo Finance 备用源重试...")
     time.sleep(1)
     st.rerun()
 
@@ -231,7 +266,7 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
     
     if st.button("⚡ 智能计算支撑压力"):
         if code_in:
-            with st.spinner("计算中..."):
+            with st.spinner("双引擎计算中..."):
                 hist, cost, zt, _ = get_stock_history_metrics(code_in)
                 if hist is not None:
                     last = hist.iloc[-1]
@@ -241,6 +276,7 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
                     st.session_state.calc_r2 = round(pivot + (last['最高'] - last['最低']), 2)
                     st.session_state.calc_s2 = round(pivot - (last['最高'] - last['最低']), 2)
                     st.success(f"已识别：{zt}连板" if zt>=2 else "计算完成")
+                else: st.warning("数据获取稍慢，请稍后重试")
     
     with st.form("add"):
         c1,c2=st.columns(2)
@@ -310,7 +346,7 @@ if not df.empty:
                 chg = ((price-pre)/pre)*100 if pre else 0
                 price_color = "price-up" if chg > 0 else ("price-down" if chg < 0 else "price-gray")
                 
-                # 🔥 获取数据 & 策略计算
+                # 🔥 获取数据(含备用源)
                 hist_df, cost_low, zt_count, yesterday_zt = get_stock_history_metrics(code)
                 strategy_text, strategy_class = ai_strategy_engine(info, hist_df, cost_low, zt_count, yesterday_zt)
                 
@@ -337,10 +373,7 @@ if not df.empty:
                         st.markdown(f"<div class='big-price {price_color}'>{price:.2f}</div>", unsafe_allow_html=True)
                         zt_badge = f"<span style='background:#ff0000;color:white;padding:1px 4px;border-radius:3px;font-size:0.8rem;margin-left:5px'>{zt_count}连板</span>" if zt_count>=2 else ""
                         st.markdown(f"<div style='font-weight:bold; margin-bottom:8px;'>{chg:+.2f}% {zt_badge}</div>", unsafe_allow_html=True)
-                        
-                        # 🔥 策略标签
                         st.markdown(f"<div style='margin-bottom:8px'><span class='strategy-tag {strategy_class}'>{strategy_text}</span></div>", unsafe_allow_html=True)
-                        
                         if cost_low > 0: st.markdown(f"<div class='cost-range-box'>主力成本: {cost_low:.2f}</div>", unsafe_allow_html=True)
                         
                         r1, r2 = float(row['r1']), float(row['r2'])
