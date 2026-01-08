@@ -23,7 +23,6 @@ st.markdown("""
         html, body, p, div, span { font-family: 'Source Sans Pro', sans-serif; color: #0E1117; }
         .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
         
-        /* 卡片容器 */
         div[data-testid="stVerticalBlockBorderWrapper"] {
             border: 1px solid #e6e6e6 !important;
             box-shadow: 0 2px 6px rgba(0,0,0,0.05); 
@@ -41,7 +40,6 @@ st.markdown("""
         .stock-name { font-size: 1.1rem; font-weight: bold; color: #222; }
         .stock-code { font-size: 0.8rem; color: #888; margin-left: 5px; }
         
-        /* 标签体系 */
         .strategy-tag { padding: 2px 6px; border-radius: 3px; font-size: 0.75rem; font-weight: bold; color: white; display: inline-block; vertical-align: middle; margin-right: 4px; margin-bottom: 4px;}
         .tag-dragon { background: linear-gradient(45deg, #ff0000, #ff6b6b); }
         .tag-first { background: linear-gradient(45deg, #ff9f43, #ff6b6b); }
@@ -53,20 +51,12 @@ st.markdown("""
 
         .cost-range-box { background-color: #f8f9fa; border-left: 3px solid #666; padding: 2px 6px; margin: 5px 0; border-radius: 0 4px 4px 0; font-size: 0.75rem; color: #444; }
         
-        /* 预案区域样式 (折叠栏内部) */
-        .plan-container {
-            font-size: 0.85rem;
-            color: #444;
-            padding: 5px;
-        }
+        .plan-container { font-size: 0.85rem; color: #444; padding: 5px; }
         .plan-title { font-weight: bold; color: #2c3e50; font-size: 0.9rem; margin-bottom: 5px; border-bottom: 1px dashed #ddd; padding-bottom: 3px;}
         .plan-item { margin-bottom: 4px; line-height: 1.4; }
         .highlight-money { color: #d9534f; font-weight: bold; background: #fff5f5; padding: 0 4px; border-radius: 3px; }
         
-        /* 实时建议样式 */
-        .advice-box {
-            margin-top: 5px; padding: 6px; border-radius: 4px; font-weight: bold; text-align: center; font-size: 0.85rem;
-        }
+        .advice-box { margin-top: 5px; padding: 6px; border-radius: 4px; font-weight: bold; text-align: center; font-size: 0.85rem; }
         .advice-buy { background-color: #d9534f; color: white; animation: pulse 2s infinite;}
         .advice-sell { background-color: #5cb85c; color: white; }
         .advice-hold { background-color: #3498db; color: white; }
@@ -77,14 +67,10 @@ st.markdown("""
             100% { box-shadow: 0 0 0 0 rgba(217, 83, 79, 0); }
         }
         
-        /* 支撑压力微调 */
         .sr-block { padding-top: 6px; border-top: 1px dashed #eee; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
         .sr-item { font-size: 0.8rem; font-weight: bold; color: #555; }
-
-        /* 按钮全宽 */
         div[data-testid="stButton"] button { width: 100%; }
         
-        /* Expander 头部微调 */
         .streamlit-expanderHeader {
             font-size: 0.9rem !important;
             font-weight: bold !important;
@@ -92,7 +78,6 @@ st.markdown("""
             background-color: #f8f9fa !important;
             border-radius: 4px !important;
         }
-        
     </style>
 """, unsafe_allow_html=True)
 
@@ -154,17 +139,14 @@ def get_realtime_quotes(code_list):
         return data
     except: return {}
 
-# --- 🔥 获取历史数据 (含60日最大成交额) ---
 @st.cache_data(ttl=3600)
 def get_stock_history_metrics(code):
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=120)).strftime("%Y%m%d") 
     stock_df = None
-    
     try:
         stock_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
     except: pass
-    
     if stock_df is None or stock_df.empty:
         try:
             y_code = f"{code}.SS" if code.startswith('6') else f"{code}.SZ"
@@ -183,21 +165,17 @@ def get_stock_history_metrics(code):
         try:
             stock_df['MA5'] = stock_df['收盘'].rolling(5).mean()
             stock_df['MA10'] = stock_df['收盘'].rolling(10).mean()
-            
             recent = stock_df.tail(20)
             total_amt = recent['成交额'].sum()
             total_vol = recent['成交量'].sum()
             avg_cost = (total_amt / total_vol) if total_vol > 0 else 0
             if avg_cost > 200: avg_cost /= 100
-            
             stock_df['is_zt'] = stock_df['涨跌幅'] > 9.5
-            
             zt_count = 0
             check_df = stock_df.copy()
             for i in range(len(check_df)-1, -1, -1):
                 if check_df.iloc[i]['is_zt']: zt_count += 1
                 else: break
-            
             recent_15 = stock_df.tail(20)
             max_streak = 0
             curr_str = 0
@@ -207,10 +185,8 @@ def get_stock_history_metrics(code):
                     max_streak = max(max_streak, curr_str)
                     curr_str = 0
             max_streak = max(max_streak, curr_str)
-
             recent_60 = stock_df.tail(60)
             max_amount_60d = recent_60['成交额'].max()
-            
             return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False, max_streak, max_amount_60d
         except: return None, 0, 0, False, 0, 0
     return None, 0, 0, False, 0, 0
@@ -218,19 +194,10 @@ def get_stock_history_metrics(code):
 # --- 🧠 核心：操盘预案与实时建议 ---
 
 def format_money(num):
-    """
-    精准金额格式化，消灭小数点错误
-    """
-    if pd.isna(num) or num == 0:
-        return "N/A"
-    
+    if pd.isna(num) or num == 0: return "N/A"
     num = float(num)
-    
-    if num > 100000000: 
-        return f"{num/100000000:.2f}亿"
-    if num > 10000: 
-        return f"{num/10000:.2f}万"
-    
+    if num > 100000000: return f"{num/100000000:.2f}亿"
+    if num > 10000: return f"{num/10000:.2f}万"
     return f"{num:.2f}"
 
 def generate_plan_and_advice(code, name, current_price, open_price, pre_close, max_amount_60d, zt_count):
@@ -240,10 +207,13 @@ def generate_plan_and_advice(code, name, current_price, open_price, pre_close, m
     plan_html = ""
     advice_html = ""
     
-    # 1. 核心指标
+    # 1. 核心指标计算
     target_auction_amt = max_amount_60d * 0.05
-    exp_open_low = pre_close * 1.02
-    exp_open_high = pre_close * 1.06
+    
+    # 🔥 核心修正：理想开盘是基于【今日收盘价】(即明天的pre_close) 来计算的
+    # 因为我们是在做明天的预案
+    exp_open_low = current_price * 1.02
+    exp_open_high = current_price * 1.06
     
     # 2. 生成静态预案 HTML
     plan_html += f"<div class='plan-title'>🎲 {zt_count}进{zt_count+1} 操盘推演</div>"
@@ -254,7 +224,7 @@ def generate_plan_and_advice(code, name, current_price, open_price, pre_close, m
     plan_html += "<div class='plan-item'>2. <b>❄️ 不及预期(卖点)：</b>低开/平开，竞价无量，开盘迅速跌破均线。</div>"
     plan_html += "<div class='plan-item'>3. <b>🔒 缩量锁仓：</b>竞价/开盘直接涨停(一字/秒板)，量能极小。👉 **持有不动**。</div>"
 
-    # 3. 生成实时建议 (仅在交易时间有效)
+    # 3. 生成实时建议 (仅在交易时间有效，基于实时价格对比昨日收盘)
     trading_active, _ = is_trading_time()
     
     if trading_active and open_price > 0:
@@ -264,7 +234,6 @@ def generate_plan_and_advice(code, name, current_price, open_price, pre_close, m
         pct = (current_price - pre_close) / pre_close * 100
         open_pct = (open_price - pre_close) / pre_close * 100
         
-        # 连板模式策略
         if current_price >= (pre_close * 1.098):
             advice_text = "🔒 涨停锁仓"
             advice_class = "advice-hold"
@@ -280,7 +249,6 @@ def generate_plan_and_advice(code, name, current_price, open_price, pre_close, m
         else:
             advice_text = "🔵 盘中震荡"
             advice_class = "advice-hold"
-                
         advice_html = f"<div class='advice-box {advice_class}'>{advice_text}</div>"
     
     return plan_html, advice_html
@@ -291,7 +259,6 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt, max
     high = info['high']
     pct_chg = ((price - pre_close) / pre_close) * 100
     day_vwap = info['amount'] / info['vol'] if info['vol'] > 0 else price
-    
     if history_df is None or history_df.empty: return "数据加载中...", "tag-wait"
     try:
         ma5 = history_df.iloc[-1]['MA5']
@@ -305,17 +272,12 @@ def ai_strategy_engine(info, history_df, smart_cost, zt_count, yesterday_zt, max
         else: return "💀 龙头退潮", "tag-sell"
 
     if zt_count >= 2: return f"🚀 {zt_count}连板持筹", "tag-dragon"
-    
-    if not yesterday_zt and pct_chg > 9.5:
-        return "🚀 首板启动", "tag-first"
-    
+    if not yesterday_zt and pct_chg > 9.5: return "🚀 首板启动", "tag-first"
     if yesterday_zt and zt_count < 2:
         if 2 < pct_chg < 9.0 and price > day_vwap: return "🚀 1进2 接力", "tag-buy"
         if pct_chg > 9.0: return "🚀 秒板/一字", "tag-dragon"
-    
     high_pct = ((high - pre_close) / pre_close) * 100
     if high_pct > 7 and pct_chg < 3 and price > ma5: return "👆 仙人指路", "tag-special"
-    
     if pct_chg > 0 and price > day_vwap: return "💪 趋势向上", "tag-wait"
     if pct_chg < 0 and price < day_vwap: return "🤢 弱势调整", "tag-wait"
     return "😴 观望", "tag-wait"
@@ -424,7 +386,6 @@ if not df.empty:
         group_df = df[df['group'] == group]
         rows = [r for _, r in group_df.iterrows()]
         
-        # 🔥🔥🔥 回归 4 列布局 🔥🔥🔥
         for i in range(0, len(rows), 4):
             cols = st.columns(4)
             chunk = rows[i:i+4]
@@ -443,7 +404,6 @@ if not df.empty:
                 
                 with cols[j]:
                     with st.container(border=True):
-                        # 头部
                         col_name, col_grp_btn, col_del_btn = st.columns([5, 1, 1])
                         with col_name: st.markdown(f"<div style='white-space: nowrap; overflow: hidden; text-overflow: ellipsis;'><span class='stock-name'>{name}</span> <span class='stock-code'>{code}</span></div>", unsafe_allow_html=True)
                         with col_grp_btn:
@@ -454,20 +414,17 @@ if not df.empty:
                                         df.loc[df.code==code,'group']=new_grp
                                         save_data(df)
                                         st.rerun()
-                        # 🔥 变量名修正 🔥
                         with col_del_btn: 
                              if st.button("🗑️", key=f"d_{code}"):
                                 delete_single_stock(code)
                                 st.rerun()
 
-                        # 价格
                         st.markdown(f"<div class='big-price {price_color}'>{price:.2f}</div>", unsafe_allow_html=True)
                         zt_badge = f"<span style='background:#ff0000;color:white;padding:1px 4px;border-radius:3px;font-size:0.8rem;margin-left:5px'>{zt_count}连板</span>" if zt_count>=2 else ""
                         st.markdown(f"<div style='font-weight:bold; margin-bottom:8px;'>{chg:+.2f}% {zt_badge}</div>", unsafe_allow_html=True)
                         st.markdown(f"<span class='strategy-tag {strategy_class}'>{strategy_text}</span>", unsafe_allow_html=True)
                         if cost_low>0: st.markdown(f"<div class='cost-range-box'>主力: {cost_low:.2f}</div>", unsafe_allow_html=True)
                         
-                        # 🔥 S/R 小数点修正：强制 :.2f 🔥
                         r1, r2, s1, s2 = float(row['r1']), float(row['r2']), float(row['s1']), float(row['s2'])
                         st.markdown(f"""
                         <div class='sr-block'>
@@ -479,7 +436,6 @@ if not df.empty:
                         """, unsafe_allow_html=True)
                         if str(row['note']) not in ['nan', '']: st.caption(f"📝 {row['note']}")
                         
-                        # 智能可折叠预案 (仅限 1-3板)
                         if 1 <= zt_count <= 3 or strategy_text == "🚀 首板启动":
                             with st.expander(f"🎲 点击推演: {zt_count}进{zt_count+1}"):
                                 plan_html, advice_html = generate_plan_and_advice(code, name, price, open_p, pre_close, max_amt_60d, zt_count)
