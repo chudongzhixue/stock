@@ -30,13 +30,12 @@ try:
 except:
     USE_CLOUD_DB = False
 
-# --- 🎨 CSS 样式 (标准展开版) ---
+# --- 🎨 CSS 样式 ---
 st.markdown("""
     <style>
         html, body, p, div, span { font-family: 'Source Sans Pro', sans-serif; color: #0E1117; }
         .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
         
-        /* 卡片容器 */
         div[data-testid="stVerticalBlockBorderWrapper"] {
             border: 1px solid #e6e6e6 !important;
             box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
@@ -54,7 +53,6 @@ st.markdown("""
         .stock-name { font-size: 1.1rem; font-weight: bold; color: #222; }
         .stock-code { font-size: 0.8rem; color: #888; margin-left: 5px; }
         
-        /* 策略标签 */
         .strategy-badge { 
             padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white; 
             display: inline-block; vertical-align: middle; margin-right: 4px; margin-bottom: 4px;
@@ -70,6 +68,7 @@ st.markdown("""
         .cost-range-box { background-color: #f8f9fa; border-left: 3px solid #666; padding: 2px 6px; margin: 5px 0; border-radius: 0 4px 4px 0; font-size: 0.75rem; color: #444; }
         
         .plan-container { font-size: 0.85rem; color: #444; padding: 5px; }
+        .plan-title { font-weight: bold; color: #2c3e50; font-size: 0.9rem; margin-bottom: 5px; border-bottom: 1px dashed #ddd; padding-bottom: 3px;}
         .plan-item { margin-bottom: 4px; line-height: 1.4; }
         .highlight-money { color: #d9534f; font-weight: bold; background: #fff5f5; padding: 0 4px; border-radius: 3px; }
         .highlight-support { color: #2980b9; font-weight: bold; background: #eaf2f8; padding: 0 4px; border-radius: 3px; }
@@ -493,8 +492,13 @@ def prefetch_all_data(stock_codes):
 
 # --- 主界面 ---
 st.title("Alpha 游资系统 Pro + AI")
+
+# 🔥 修复的核心：在这里初始化 trading_active
+trading_active, trading_status_msg = is_trading_time()
+
 status_msg = "☁️ 云端同步中" if USE_CLOUD_DB else "💾 本地模式 (请注意备份)"
-st.sidebar.markdown(f"当前状态: **{status_msg}**")
+st.sidebar.markdown(f"系统状态: **{status_msg}**")
+st.sidebar.markdown(f"市场状态: **{trading_status_msg}**")
 
 enable_refresh = st.sidebar.toggle("⚡ 智能实时刷新", value=True)
 
@@ -553,11 +557,9 @@ st.sidebar.markdown("---")
 
 df = load_data()
 
-# 🔥 侧边栏：添加/编辑个股 (NameError 修复点)
 with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
     code_in = st.text_input("代码 (6位数)", key="cin").strip()
     
-    # 强制初始化 Session State 防止报错
     if 'calc_s1' not in st.session_state:
         st.session_state.calc_s1 = 0.0
         st.session_state.calc_s2 = 0.0
@@ -577,8 +579,8 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
                     st.session_state.calc_s2 = round(pivot - (last['最高'] - last['最低']), 2)
                     st.success(f"识别结果：{zt}连板")
     
-    # 明确展开表单逻辑，防止 NameError
     with st.form("add"):
+        # 确保列名明确
         col1, col2 = st.columns(2)
         s1 = col1.number_input("支撑1", value=float(st.session_state.calc_s1))
         s2 = col1.number_input("支撑2", value=float(st.session_state.calc_s2))
@@ -670,7 +672,9 @@ if not df.empty:
                         st.markdown(f"<div style='font-weight:bold; margin-bottom:8px;'>{chg:+.2f}% {zt_badge}</div>", unsafe_allow_html=True)
                         st.markdown(f"<span class='strategy-badge {badge_style}'>{assigned_strategy.split(' ')[0]}</span>", unsafe_allow_html=True)
                         
-                        if is_trading_time()[0]: st.markdown(f"<div class='advice-box {ai_style}'>{ai_advice}</div>", unsafe_allow_html=True)
+                        if trading_active:
+                            st.markdown(f"<div class='advice-box {ai_style}'>{ai_advice}</div>", unsafe_allow_html=True)
+                        
                         if cost_low>0: st.markdown(f"<div class='cost-range-box'>主力: {cost_low:.2f}</div>", unsafe_allow_html=True)
                         
                         r1, r2, s1, s2 = float(row['r1']), float(row['r2']), float(row['s1']), float(row['s2'])
