@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 尝试连接 Google Sheets ---
+# --- 尝试连接 Google Sheets (云端同步) ---
 try:
     from streamlit_gsheets import GSheetsConnection
     # 检查是否配置了 secrets
@@ -34,111 +34,141 @@ st.markdown("""
     <style>
         html, body, p, div, span { font-family: 'Source Sans Pro', sans-serif; color: #0E1117; }
         .block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; }
+        
         div[data-testid="stVerticalBlockBorderWrapper"] {
-            border: 1px solid #e6e6e6 !important; box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
-            background-color: #ffffff; padding: 15px !important; border-radius: 12px; margin-bottom: 15px;
+            border: 1px solid #e6e6e6 !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
+            background-color: #ffffff; 
+            padding: 15px !important;
+            border-radius: 12px;
+            margin-bottom: 15px;
         }
+
         .big-price { font-size: 2.2rem; font-weight: 900; line-height: 1.0; letter-spacing: -1px; margin-bottom: 5px; }
-        .price-up { color: #d9534f; } .price-down { color: #5cb85c; } .price-gray { color: #888; }
+        .price-up { color: #d9534f; }
+        .price-down { color: #5cb85c; }
+        .price-gray { color: #888; }
+        
         .stock-name { font-size: 1.1rem; font-weight: bold; color: #222; }
         .stock-code { font-size: 0.8rem; color: #888; margin-left: 5px; }
-        .strategy-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white; display: inline-block; vertical-align: middle; margin-right: 4px; margin-bottom: 4px; background-color: #333; }
+        
+        .strategy-badge { 
+            padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white; 
+            display: inline-block; vertical-align: middle; margin-right: 4px; margin-bottom: 4px;
+            background-color: #333;
+        }
         .bg-dragon { background: linear-gradient(45deg, #d32f2f, #ef5350); }
         .bg-relay { background: linear-gradient(45deg, #f57c00, #ffb74d); }
         .bg-low { background: linear-gradient(45deg, #1976d2, #42a5f5); }
         .bg-trend { background: linear-gradient(45deg, #388e3c, #66bb6a); }
         .bg-mood { background: linear-gradient(45deg, #7b1fa2, #ab47bc); }
         .bg-auto { background-color: #7f8c8d; }
+
         .cost-range-box { background-color: #f8f9fa; border-left: 3px solid #666; padding: 2px 6px; margin: 5px 0; border-radius: 0 4px 4px 0; font-size: 0.75rem; color: #444; }
+        
         .plan-container { font-size: 0.85rem; color: #444; padding: 5px; }
         .plan-title { font-weight: bold; color: #2c3e50; font-size: 0.9rem; margin-bottom: 5px; border-bottom: 1px dashed #ddd; padding-bottom: 3px;}
         .plan-item { margin-bottom: 4px; line-height: 1.4; }
         .highlight-money { color: #d9534f; font-weight: bold; background: #fff5f5; padding: 0 4px; border-radius: 3px; }
         .highlight-support { color: #2980b9; font-weight: bold; background: #eaf2f8; padding: 0 4px; border-radius: 3px; }
+        
         .advice-box { margin-top: 5px; padding: 8px; border-radius: 4px; font-weight: bold; text-align: center; font-size: 0.9rem; border: 1px solid #eee; }
         .advice-buy { background-color: #fff3f3; color: #d9534f; border-color: #d9534f; animation: pulse 2s infinite;}
         .advice-sell { background-color: #f0f9f0; color: #5cb85c; border-color: #5cb85c; }
         .advice-hold { background-color: #f0f8ff; color: #3498db; border-color: #3498db; }
-        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(217, 83, 79, 0.2); } 70% { box-shadow: 0 0 0 5px rgba(217, 83, 79, 0); } 100% { box-shadow: 0 0 0 0 rgba(217, 83, 79, 0); } }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(217, 83, 79, 0.2); }
+            70% { box-shadow: 0 0 0 5px rgba(217, 83, 79, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(217, 83, 79, 0); }
+        }
+        
         .sr-block { padding-top: 6px; border-top: 1px dashed #eee; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
         .sr-item { font-size: 0.8rem; font-weight: bold; color: #555; }
         div[data-testid="stButton"] button { width: 100%; }
-        .streamlit-expanderHeader { font-size: 0.9rem !important; font-weight: bold !important; color: #333 !important; background-color: #f8f9fa !important; border-radius: 4px !important; }
+        
+        .streamlit-expanderHeader {
+            font-size: 0.9rem !important;
+            font-weight: bold !important;
+            color: #333 !important;
+            background-color: #f8f9fa !important;
+            border-radius: 4px !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
 DATA_FILE = 'my_stock_plan_v3.csv'
 TRAIN_DATA_FILE = 'ai_training_dataset.csv'
 VIDEO_DIR = 'training_videos'
+
 if not os.path.exists(VIDEO_DIR): os.makedirs(VIDEO_DIR)
 
 STRATEGY_OPTIONS = [
-    "🤖 自动判断 (Auto)", "🐲 龙头掘金 (机构波段)", "🚀 连板接力 (1进2/2进3)",
-    "📉 涨停回调 (低吸)", "🌊 趋势低吸 (5日/10日线)", "🔥 短线情绪 (游资跟随)"
+    "🤖 自动判断 (Auto)",
+    "🐲 龙头掘金 (机构波段)",
+    "🚀 连板接力 (1进2/2进3)",
+    "📉 涨停回调 (低吸)",
+    "🌊 趋势低吸 (5日/10日线)",
+    "🔥 短线情绪 (游资跟随)"
 ]
 
-# --- 🔥 核心：双模态数据引擎 (Cloud + Local) ---
-
-def load_data():
-    """读取自选股配置 (优先云端)"""
-    default_cols = ["code", "name", "s1", "s2", "r1", "r2", "group", "strategy", "note"]
-    
-    if USE_CLOUD_DB:
-        try:
-            # 从 Google Sheets 读取 (Worksheet 0: stock_config)
-            df = conn.read(worksheet="stock_config", ttl=0)
-            df['code'] = df['code'].astype(str).str.zfill(6) # 确保代码是6位字符串
-            # 补全缺失列
-            for col in default_cols:
-                if col not in df.columns: df[col] = 0.0 if col not in ['name','group','strategy','note'] else ""
-            return df[default_cols]
-        except Exception as e:
-            st.error(f"云端读取失败，降级为本地模式: {e}")
-    
-    # 本地 CSV 兜底
-    if not os.path.exists(DATA_FILE):
-        df = pd.DataFrame(columns=default_cols)
-        df.to_csv(DATA_FILE, index=False)
-        return df
-    df = pd.read_csv(DATA_FILE, dtype={"code": str})
-    if "strategy" not in df.columns: df["strategy"] = "🤖 自动判断 (Auto)"; save_data_local(df)
-    return df
+# --- 核心数据管理 (云端 + 本地) ---
 
 def save_data(df):
-    """保存自选股配置 (双向同步)"""
+    """保存配置 (优先云端)"""
     if USE_CLOUD_DB:
         try:
             conn.update(worksheet="stock_config", data=df)
             st.toast("☁️ 云端同步成功！")
         except:
             st.error("云端保存失败，仅保存本地")
-    
-    # 永远备份一份本地 CSV
     df.to_csv(DATA_FILE, index=False)
 
-def save_data_local(df): df.to_csv(DATA_FILE, index=False)
-
-def load_train_data():
-    """读取 AI 训练数据"""
-    cols = ["record_date", "code", "name", "strategy_type", "price_at_entry", 
-            "cost_at_entry", "video_path", "note", 
-            "next_day_open_pct", "next_day_high_pct", "next_day_close_pct", "result_label"]
+def load_data():
+    """读取配置"""
+    default_cols = ["code", "name", "s1", "s2", "r1", "r2", "group", "strategy", "note"]
     
     if USE_CLOUD_DB:
         try:
-            df = conn.read(worksheet="ai_dataset", ttl=0)
+            df = conn.read(worksheet="stock_config", ttl=0)
             df['code'] = df['code'].astype(str).str.zfill(6)
-            return df
-        except: pass
+            for col in default_cols:
+                if col not in df.columns: df[col] = 0.0 if col not in ['name','group','strategy','note'] else ""
+            return df[default_cols]
+        except:
+            pass # 降级到本地
+    
+    if not os.path.exists(DATA_FILE):
+        df = pd.DataFrame(columns=default_cols)
+        df.to_csv(DATA_FILE, index=False)
+        return df
+    
+    df = pd.read_csv(DATA_FILE, dtype={"code": str})
+    # 兼容性处理
+    if "strategy" not in df.columns: 
+        df["strategy"] = "🤖 自动判断 (Auto)"
+        df.to_csv(DATA_FILE, index=False)
         
+    expected_cols = ["code", "name", "s1", "s2", "r1", "r2", "group", "strategy", "note"]
+    for col in expected_cols:
+        if col not in df.columns: df[col] = 0.0
+    
+    df = df[expected_cols]
+    df['code'] = df['code'].str.strip()
+    df.drop_duplicates(subset=['code'], keep='last', inplace=True)
+    return df
+
+def load_train_data():
     if not os.path.exists(TRAIN_DATA_FILE):
+        cols = ["record_date", "code", "name", "strategy_type", "price_at_entry", 
+                "cost_at_entry", "video_path", "note", 
+                "next_day_open_pct", "next_day_high_pct", "next_day_close_pct", "result_label"]
         df = pd.DataFrame(columns=cols)
         df.to_csv(TRAIN_DATA_FILE, index=False)
         return df
     return pd.read_csv(TRAIN_DATA_FILE, dtype={"code": str})
 
 def save_train_data(df):
-    """保存 AI 训练数据"""
     if USE_CLOUD_DB:
         try:
             conn.update(worksheet="ai_dataset", data=df)
@@ -190,7 +220,7 @@ def auto_label_data():
                 count += 1
         except: pass
     if count > 0: save_train_data(df)
-    return f"已回填 {count} 条结果"
+    return f"已自动回填 {count} 条结果"
 
 def delete_single_stock(code_to_delete):
     df = load_data()
@@ -202,10 +232,13 @@ def delete_single_stock(code_to_delete):
 
 # --- 辅助功能 ---
 def is_trading_time():
+    """判断是否在交易时间，返回 (bool, str)"""
     now = datetime.utcnow() + timedelta(hours=8)
     if now.weekday() >= 5: return False, "周末休市"
     t = now.time()
-    if (dt_time(9,15)<=t<=dt_time(11,30)) or (dt_time(13,0)<=t<=dt_time(15,0)): return True, "交易中"
+    # 9:15-11:30, 13:00-15:00
+    if (dt_time(9,15)<=t<=dt_time(11,30)) or (dt_time(13,0)<=t<=dt_time(15,0)): 
+        return True, "交易中"
     return False, "非交易时间"
 
 def get_realtime_quotes(code_list):
@@ -220,7 +253,11 @@ def get_realtime_quotes(code_list):
                 code = line.split('="')[0].split('_')[-1][2:]
                 val = line.split('="')[1].strip('";').split(',')
                 if len(val) > 30:
-                    data[code] = {"name": val[0], "open": float(val[1]), "pre_close": float(val[2]), "price": float(val[3])}
+                    data[code] = {
+                        "name": val[0], "open": float(val[1]), "pre_close": float(val[2]), 
+                        "price": float(val[3]), "high": float(val[4]), "low": float(val[5]),
+                        "vol": float(val[8]), "amount": float(val[9])
+                    }
         return data
     except: return {}
 
@@ -229,7 +266,8 @@ def get_stock_history_metrics(code):
     end_date = datetime.now().strftime("%Y%m%d")
     start_date = (datetime.now() - timedelta(days=120)).strftime("%Y%m%d") 
     stock_df = None
-    try: stock_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+    try:
+        stock_df = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
     except: pass
     if stock_df is None or stock_df.empty:
         try:
@@ -252,22 +290,30 @@ def get_stock_history_metrics(code):
             stock_df['MA10'] = stock_df['收盘'].rolling(10).mean()
             stock_df['MA20'] = stock_df['收盘'].rolling(20).mean()
             recent = stock_df.tail(20)
-            total_amt = recent['成交额'].sum(); total_vol = recent['成交量'].sum()
+            total_amt = recent['成交额'].sum()
+            total_vol = recent['成交量'].sum()
             avg_cost = (total_amt / total_vol) if total_vol > 0 else 0
             if avg_cost > 200: avg_cost /= 100
             stock_df['is_zt'] = stock_df['涨跌幅'] > 9.5
-            zt_count = 0; check_df = stock_df.copy()
+            zt_count = 0
+            check_df = stock_df.copy()
             for i in range(len(check_df)-1, -1, -1):
                 if check_df.iloc[i]['is_zt']: zt_count += 1
                 else: break
             recent_15 = stock_df.tail(20)
-            max_streak = 0; curr_str = 0
+            max_streak = 0
+            curr_str = 0
             for zt in recent_15['is_zt']:
                 if zt: curr_str += 1
-                else: max_streak = max(max_streak, curr_str); curr_str = 0
+                else:
+                    max_streak = max(max_streak, curr_str)
+                    curr_str = 0
             max_streak = max(max_streak, curr_str)
-            max_amount_60d = stock_df.tail(60)['成交额'].max()
+            recent_60 = stock_df.tail(60)
+            max_amount_60d = recent_60['成交额'].max()
+            
             last_turnover = stock_df.iloc[-1]['换手率'] if '换手率' in stock_df.columns else 0.0
+            
             return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False, max_streak, max_amount_60d, last_turnover
         except: return None, 0, 0, False, 0, 0, 0
     return None, 0, 0, False, 0, 0, 0
@@ -282,78 +328,102 @@ def format_money(num):
 # --- 🔥 AI 实时操盘大脑 ---
 def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_count, max_streak, max_amount_60d, turnover):
     if history_df is None or history_df.empty: return "数据不足", "bg-auto", ""
-    price = info['price']; open_p = info['open']; pre_close = info['pre_close']
+    
+    price = info['price']
+    open_p = info['open']
+    pre_close = info['pre_close']
     pct_chg = ((price - pre_close) / pre_close) * 100
     open_pct = ((open_p - pre_close) / pre_close) * 100
-    ma5 = history_df.iloc[-1]['MA5']; ma10 = history_df.iloc[-1]['MA10']
+    ma5 = history_df.iloc[-1]['MA5']
+    ma10 = history_df.iloc[-1]['MA10']
+    ma20 = history_df.iloc[-1]['MA20']
     
-    advice = "观察"; style = "advice-hold"; badge_style = "bg-auto"
+    advice = "观察"
+    style = "advice-hold"
+    badge_style = "bg-auto"
     
+    # 策略 1: 🐲 龙头掘金
     if "龙头掘金" in strategy_name:
         badge_style = "bg-dragon"
         if price > avg_cost and price > ma10:
-            if pct_chg < -3: advice = "🟢 回调洗盘: 吸"; style = "advice-buy"
-            elif pct_chg > 5: advice = "🔴 加速: 持"; style = "advice-hold"
-            else: advice = "🔵 趋势好: 持"; style = "advice-hold"
-        elif price < ma10: advice = "⚠️ 破10日: 减"; style = "advice-sell"
+            if pct_chg < -3: advice = "🟢 回调洗盘: 可分批吸纳"; style = "advice-buy"
+            elif pct_chg > 5: advice = "🔴 加速拉升: 持股"; style = "advice-hold"
+            else: advice = "🔵 趋势良好: 持仓"; style = "advice-hold"
+        elif price < ma10: advice = "⚠️ 破10日线: 减仓"; style = "advice-sell"
 
+    # 策略 2: 🚀 连板接力
     elif "连板接力" in strategy_name:
         badge_style = "bg-relay"
         threshold_open = 3.0 if turnover > 15 else 1.0
         if open_pct > threshold_open and price > open_p:
             if pct_chg > 9.5: advice = "🔒 涨停锁仓"; style = "advice-hold"
-            else: advice = "🔥 弱转强: 买"; style = "advice-buy"
-        elif open_pct < -2: advice = "❄️ 不及预期: 撤"; style = "advice-sell"
-        elif price < pre_close: advice = "🟢 水下: 观望"; style = "advice-sell"
-        else: advice = "🔵 分歧: 等"; style = "advice-hold"
+            else: advice = "🔥 弱转强: 确认买点"; style = "advice-buy"
+        elif open_pct < -2:
+            advice = "❄️ 严重不及预期: 离场"; style = "advice-sell"
+        elif price < pre_close:
+            advice = "🟢 水下震荡: 观望"; style = "advice-sell"
+        else:
+            advice = "🔵 分歧震荡: 等换手"; style = "advice-hold"
 
+    # 策略 3: 📉 涨停回调
     elif "涨停回调" in strategy_name:
         badge_style = "bg-low"
         dist_ma10 = (price - ma10) / ma10
-        if -0.02 < dist_ma10 < 0.02: advice = "🎯 踩10日线: 吸"; style = "advice-buy"
-        elif price < ma10: advice = "🚫 破位: 止"; style = "advice-sell"
-        else: advice = "🔵 等回落"; style = "advice-hold"
+        if -0.02 < dist_ma10 < 0.02: advice = "🎯 回踩10日线: 低吸博弈"; style = "advice-buy"
+        elif price < ma10: advice = "🚫 破位: 止损"; style = "advice-sell"
+        else: advice = "🔵 等待回落"; style = "advice-hold"
 
+    # 策略 4: 🌊 趋势低吸
     elif "趋势低吸" in strategy_name:
         badge_style = "bg-trend"
-        if price > ma5: advice = "🔴 5日上: 持"; style = "advice-hold"
-        elif price < ma5 and price > ma10: advice = "⚠️ 破5日: 减"; style = "advice-sell"
-        else: advice = "🟢 破位: 清"; style = "advice-sell"
+        if price > ma5: advice = "🔴 5日线上: 持股"; style = "advice-hold"
+        elif price < ma5 and price > ma10: advice = "⚠️ 破5日线: 减仓"; style = "advice-sell"
+        else: advice = "🟢 破位: 清仓"; style = "advice-sell"
 
+    # 策略 5: 🔥 短线情绪
     elif "短线情绪" in strategy_name:
         badge_style = "bg-mood"
-        if pct_chg > 7: advice = "🔥 高潮: 止盈"; style = "advice-sell"
-        elif pct_chg < -5: advice = "❄️ 冰点: 博弈"; style = "advice-buy"
-        else: advice = "🔵 跟随"; style = "advice-hold"
+        if pct_chg > 7: advice = "🔥 情绪高潮: 获利"; style = "advice-sell"
+        elif pct_chg < -5: advice = "❄️ 冰点: 核按钮吸"; style = "advice-buy"
+        else: advice = "🔵 跟随盘口"; style = "advice-hold"
+
     else:
         badge_style = "bg-auto"
-        if zt_count >= 2: advice = f"🚀 {zt_count}连板"; style = "advice-hold"
+        if zt_count >= 2: advice = f"🚀 {zt_count}连板持筹"; style = "advice-hold"
         elif pct_chg > 5: advice = "🔴 强势"; style = "advice-hold"
         else: advice = "🔵 观察"; style = "advice-hold"
 
     return advice, style, badge_style
 
 def generate_plan_details(strategy_name, code, current_price, pre_close, max_amount_60d, turnover, ma5, ma10, ma20):
+    """生成的右侧预案详情"""
     html = ""
     if "连板" in strategy_name or "龙头" in strategy_name or "情绪" in strategy_name:
         target_auction_amt = max_amount_60d * 0.05
         base_open_pct = 2.0 if turnover < 10 else 4.0 
         exp_open_low = current_price * (1 + base_open_pct/100)
         exp_open_high = current_price * (1 + (base_open_pct+4)/100)
+        
         html += f"<div class='plan-item'>🎯 <b>竞价目标：</b><span class='highlight-money'>{format_money(target_auction_amt)}</span></div>"
-        html += f"<div class='plan-item'>📊 <b>理想开盘：</b>{exp_open_low:.2f}~{exp_open_high:.2f}</div>"
+        html += f"<div class='plan-item'>📊 <b>理想开盘：</b>{exp_open_low:.2f} ~ {exp_open_high:.2f}</div>"
         html += "<hr style='margin:4px 0; border-top:1px dashed #ddd;'>"
         html += "<div class='plan-item'>1. <b>弱转强：</b>竞价达标，开盘不破均线 👉 买入。</div>"
         html += "<div class='plan-item'>2. <b>不及预期：</b>低开/平开，无量下杀 👉 卖出。</div>"
+    
     elif "低吸" in strategy_name or "回调" in strategy_name or "趋势" in strategy_name:
         support_price = ma10 if ma10 > 0 else (ma5 if ma5 > 0 else current_price * 0.95)
-        buy_zone_high = support_price * 1.01; buy_zone_low = support_price * 0.99
+        buy_zone_high = support_price * 1.01
+        buy_zone_low = support_price * 0.99
+        
         html += f"<div class='plan-item'>🛡️ <b>关键支撑：</b><span class='highlight-support'>{support_price:.2f}</span></div>"
         html += f"<div class='plan-item'>🎯 <b>伏击区间：</b>{buy_zone_low:.2f} ~ {buy_zone_high:.2f}</div>"
         html += "<hr style='margin:4px 0; border-top:1px dashed #ddd;'>"
         html += "<div class='plan-item'>1. <b>黄金坑：</b>缩量回踩支撑 👉 低吸。</div>"
         html += "<div class='plan-item'>2. <b>破位：</b>有效跌破支撑 👉 止损。</div>"
-    else: html += "<div class='plan-item'>🤖 暂无特定战法，请观察盘口。</div>"
+    
+    else:
+        html += "<div class='plan-item'>🤖 暂无特定战法，请观察盘口资金流向。</div>"
+        
     return html
 
 def prefetch_all_data(stock_codes):
@@ -368,21 +438,33 @@ def prefetch_all_data(stock_codes):
 
 # --- 主界面 ---
 st.title("Alpha 游资系统 Pro + AI")
-status_msg = "☁️ 云端同步中" if USE_CLOUD_DB else "💾 本地模式 (请注意备份)"
-st.sidebar.markdown(f"当前状态: **{status_msg}**")
+
+# 🔥 核心修正：先获取交易状态
+trading_active, status_msg = is_trading_time()
+
+db_status = "☁️ 云端同步中" if USE_CLOUD_DB else "💾 本地模式"
+st.sidebar.markdown(f"当前状态: <span style='color:green'>{status_msg}</span> | {db_status}", unsafe_allow_html=True)
+
 enable_refresh = st.sidebar.toggle("⚡ 智能实时刷新", value=True)
-if st.sidebar.button("🧹 强制刷新数据"): st.cache_data.clear(); st.rerun()
+
+if st.sidebar.button("🧹 强制刷新数据"):
+    st.cache_data.clear()
+    st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🧠 AI 模型训练")
 if st.sidebar.button("🔄 自动回填历史结果"):
-    msg = auto_label_data(); st.toast(msg); time.sleep(1); st.rerun()
+    msg = auto_label_data()
+    st.toast(msg)
+    time.sleep(1)
+    st.rerun()
 
 with st.sidebar.form("ai_data_form"):
     train_code = st.text_input("股票代码")
     train_strategy = st.selectbox("核心战法", STRATEGY_OPTIONS)
     uploaded_video = st.file_uploader("上传视频", type=['mp4', 'mov'])
     train_note = st.text_area("补充思路")
+    
     if st.form_submit_button("💾 记录数据"):
         if train_code:
             q_data = get_realtime_quotes([train_code])
@@ -394,7 +476,23 @@ with st.sidebar.form("ai_data_form"):
                 st.toast(f"✅ 已记录：{c_name}")
         else: st.warning("请输入代码")
 
+train_df = load_train_data()
+if not train_df.empty:
+    with st.sidebar.expander("📊 查看数据集", expanded=False):
+        st.dataframe(train_df[['record_date', 'name', 'strategy_type']], hide_index=True)
+
 st.sidebar.markdown("---")
+with st.sidebar.expander("📂 数据备份", expanded=False):
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "rb") as f: st.download_button("⬇️ 自选股备份", f, "stock_backup.csv")
+    if os.path.exists(TRAIN_DATA_FILE):
+        with open(TRAIN_DATA_FILE, "rb") as f: st.download_button("⬇️ 训练集备份", f, "ai_dataset.csv")
+    uploaded_file = st.file_uploader("⬆️ 恢复自选股", type=["csv"])
+    if uploaded_file is not None:
+        pd.read_csv(uploaded_file, dtype={"code": str}).to_csv(DATA_FILE, index=False); st.rerun()
+
+st.sidebar.markdown("---")
+
 df = load_data()
 
 with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
@@ -434,6 +532,14 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
                 else: df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
                 save_data(df); st.rerun()
 
+@st.dialog("📈 个股详情", width="large")
+def view_chart_modal(code, name):
+    st.subheader(f"{name} ({code})")
+    import time; ts = int(time.time()); mid = "1" if code.startswith(('6','5','9')) else "0"
+    t1, t2 = st.tabs(["分时图", "日线图"])
+    with t1: st.image(f"https://webquotepic.eastmoney.com/GetPic.aspx?nid={mid}.{code}&imageType=r&t={ts}", use_container_width=True)
+    with t2: st.image(f"https://webquotepic.eastmoney.com/GetPic.aspx?nid={mid}.{code}&imageType=k&t={ts}", use_container_width=True)
+
 if not df.empty:
     quotes = get_realtime_quotes(df['code'].tolist())
     with st.spinner("🚀 正在分析..."):
@@ -469,6 +575,7 @@ if not df.empty:
                 price_color = "price-up" if chg > 0 else ("price-down" if chg < 0 else "price-gray")
                 
                 hist_df, cost_low, zt_count, _, _, max_amt_60d, last_to = batch_data.get(code, (None, 0, 0, False, 0, 0, 0))
+                
                 ma5 = hist_df.iloc[-1]['MA5'] if hist_df is not None else 0
                 ma10 = hist_df.iloc[-1]['MA10'] if hist_df is not None else 0
                 ma20 = hist_df.iloc[-1]['MA20'] if hist_df is not None else 0
@@ -477,15 +584,18 @@ if not df.empty:
                 
                 with cols[j]:
                     with st.container(border=True):
-                        c1, c2, c3 = st.columns([5, 1, 1])
-                        with c1: st.markdown(f"<div style='white-space:nowrap;overflow:hidden;'><span class='stock-name'>{name}</span> <span class='stock-code'>{code}</span></div>", unsafe_allow_html=True)
-                        with c2:
+                        # 🔥 变量名修复：清晰定义每一列
+                        c_name, c_tag, c_del = st.columns([5, 1, 1])
+                        
+                        with c_name: st.markdown(f"<div style='white-space:nowrap;overflow:hidden;'><span class='stock-name'>{name}</span> <span class='stock-code'>{code}</span></div>", unsafe_allow_html=True)
+                        with c_tag:
                             with st.popover("🏷️"):
                                 n_grp = st.selectbox("分组", all_groups, key=f"ng_{code}", index=all_groups.index(group) if group in all_groups else 0)
                                 n_strat = st.selectbox("战法", STRATEGY_OPTIONS, key=f"ns_{code}", index=STRATEGY_OPTIONS.index(assigned_strategy) if assigned_strategy in STRATEGY_OPTIONS else 0)
                                 if st.button("更新", key=f"up_{code}"):
                                     df.loc[df.code==code, 'group'] = n_grp; df.loc[df.code==code, 'strategy'] = n_strat; save_data(df); st.rerun()
-                        with c3:
+                        # 🔥 变量名修复：确保与上面定义的 c_del 一致
+                        with c_del:
                             if st.button("🗑️", key=f"del_{code}"): delete_single_stock(code); st.rerun()
 
                         st.markdown(f"<div class='big-price {price_color}'>{price:.2f}</div>", unsafe_allow_html=True)
@@ -493,7 +603,7 @@ if not df.empty:
                         st.markdown(f"<div style='font-weight:bold; margin-bottom:8px;'>{chg:+.2f}% {zt_badge}</div>", unsafe_allow_html=True)
                         st.markdown(f"<span class='strategy-badge {badge_style}'>{assigned_strategy.split(' ')[0]}</span>", unsafe_allow_html=True)
                         
-                        if is_trading_time()[0]: st.markdown(f"<div class='advice-box {ai_style}'>{ai_advice}</div>", unsafe_allow_html=True)
+                        if trading_active: st.markdown(f"<div class='advice-box {ai_style}'>{ai_advice}</div>", unsafe_allow_html=True)
                         if cost_low>0: st.markdown(f"<div class='cost-range-box'>主力: {cost_low:.2f}</div>", unsafe_allow_html=True)
                         
                         r1, r2, s1, s2 = float(row['r1']), float(row['r2']), float(row['s1']), float(row['s2'])
@@ -514,6 +624,7 @@ if not df.empty:
 
 else: st.info("👈 请在左侧添加股票")
 
+# 🔥 核心修正：使用已定义的 trading_active
 if enable_refresh and trading_active:
     time.sleep(3)
     st.rerun()
