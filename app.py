@@ -129,7 +129,7 @@ def load_data():
     if USE_CLOUD_DB:
         try:
             # 从 Google Sheets 读取 (Worksheet 0: stock_config)
-            df = conn.read(worksheet="stock_config", ttl=0)
+            df = conn.read(worksheet="stock_config", ttl=10)
             df['code'] = df['code'].astype(str).str.zfill(6) # 确保代码是6位字符串
             # 补全缺失列
             for col in default_cols:
@@ -183,7 +183,7 @@ def load_train_data():
     
     if USE_CLOUD_DB:
         try:
-            df = conn.read(worksheet="ai_dataset", ttl=0)
+            df = conn.read(worksheet="ai_dataset", ttl=10)
             df['code'] = df['code'].astype(str).str.zfill(6)
             return df
         except: pass
