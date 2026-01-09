@@ -4,3 +4,4 @@ requests
 akshare
 numpy
 yfinance
+st-gsheets-connection
