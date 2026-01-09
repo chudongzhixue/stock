@@ -56,9 +56,9 @@ st.markdown("""
         .cost-range-box { background-color: #f8f9fa; border-left: 3px solid #666; padding: 2px 6px; margin: 5px 0; border-radius: 0 4px 4px 0; font-size: 0.75rem; color: #444; }
         
         .plan-container { font-size: 0.85rem; color: #444; padding: 5px; }
-        .plan-title { font-weight: bold; color: #2c3e50; font-size: 0.9rem; margin-bottom: 5px; border-bottom: 1px dashed #ddd; padding-bottom: 3px;}
         .plan-item { margin-bottom: 4px; line-height: 1.4; }
         .highlight-money { color: #d9534f; font-weight: bold; background: #fff5f5; padding: 0 4px; border-radius: 3px; }
+        .highlight-support { color: #2980b9; font-weight: bold; background: #eaf2f8; padding: 0 4px; border-radius: 3px; }
         
         .advice-box { margin-top: 5px; padding: 8px; border-radius: 4px; font-weight: bold; text-align: center; font-size: 0.9rem; border: 1px solid #eee; }
         .advice-buy { background-color: #fff3f3; color: #d9534f; border-color: #d9534f; animation: pulse 2s infinite;}
@@ -264,7 +264,6 @@ def get_stock_history_metrics(code):
             recent_60 = stock_df.tail(60)
             max_amount_60d = recent_60['成交额'].max()
             
-            # 🔥 获取换手率
             last_turnover = stock_df.iloc[-1]['换手率'] if '换手率' in stock_df.columns else 0.0
             
             return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False, max_streak, max_amount_60d, last_turnover
@@ -278,7 +277,7 @@ def format_money(num):
     if num > 10000: return f"{num/10000:.2f}万"
     return f"{num:.2f}"
 
-# --- 🔥 AI 实时操盘大脑 (增强版规则) ---
+# --- 🔥 AI 实时操盘大脑 (完全差异化推演) ---
 def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_count, max_streak, max_amount_60d, turnover):
     if history_df is None or history_df.empty: return "数据不足", "bg-auto", ""
     
@@ -295,7 +294,6 @@ def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_cou
     style = "advice-hold"
     badge_style = "bg-auto"
     
-    # 策略 1: 🐲 龙头掘金
     if "龙头掘金" in strategy_name:
         badge_style = "bg-dragon"
         if price > avg_cost and price > ma10:
@@ -304,13 +302,9 @@ def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_cou
             else: advice = "🔵 趋势良好: 持仓"; style = "advice-hold"
         elif price < ma10: advice = "⚠️ 破10日线: 减仓"; style = "advice-sell"
 
-    # 策略 2: 🚀 连板接力 (规则增强)
     elif "连板接力" in strategy_name:
         badge_style = "bg-relay"
-        # 🔥 新增：换手率影响判断
-        # 如果昨日换手率极高(>15%)，今日必须高开>3%才算弱转强
         threshold_open = 3.0 if turnover > 15 else 1.0
-        
         if open_pct > threshold_open and price > open_p:
             if pct_chg > 9.5: advice = "🔒 涨停锁仓"; style = "advice-hold"
             else: advice = "🔥 弱转强: 确认买点"; style = "advice-buy"
@@ -321,7 +315,6 @@ def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_cou
         else:
             advice = "🔵 分歧震荡: 等换手"; style = "advice-hold"
 
-    # 策略 3: 📉 涨停回调
     elif "涨停回调" in strategy_name:
         badge_style = "bg-low"
         dist_ma10 = (price - ma10) / ma10
@@ -329,14 +322,12 @@ def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_cou
         elif price < ma10: advice = "🚫 破位: 止损"; style = "advice-sell"
         else: advice = "🔵 等待回落"; style = "advice-hold"
 
-    # 策略 4: 🌊 趋势低吸
     elif "趋势低吸" in strategy_name:
         badge_style = "bg-trend"
         if price > ma5: advice = "🔴 5日线上: 持股"; style = "advice-hold"
         elif price < ma5 and price > ma10: advice = "⚠️ 破5日线: 减仓"; style = "advice-sell"
         else: advice = "🟢 破位: 清仓"; style = "advice-sell"
 
-    # 策略 5: 🔥 短线情绪
     elif "短线情绪" in strategy_name:
         badge_style = "bg-mood"
         if pct_chg > 7: advice = "🔥 情绪高潮: 获利"; style = "advice-sell"
@@ -351,24 +342,48 @@ def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_cou
 
     return advice, style, badge_style
 
-def generate_plan_details(code, current_price, pre_close, max_amount_60d, turnover):
-    """生成的右侧预案详情 (增强版)"""
-    target_auction_amt = max_amount_60d * 0.05
-    # 🔥 理想开盘根据换手率调整
-    base_open_pct = 2.0 if turnover < 10 else 4.0 
-    exp_open_low = current_price * (1 + base_open_pct/100)
-    exp_open_high = current_price * (1 + (base_open_pct+4)/100)
+# 🔥🔥🔥 核心修正：推演逻辑差异化 🔥🔥🔥
+def generate_plan_details(strategy_name, code, current_price, pre_close, max_amount_60d, turnover, ma5, ma10, ma20):
+    """
+    根据不同战法，生成完全不同的推演剧本
+    """
+    html = ""
     
-    html = f"<div class='plan-item'>🎯 <b>竞价目标：</b><span class='highlight-money'>{format_money(target_auction_amt)}</span></div>"
-    html += f"<div class='plan-item'>📊 <b>理想开盘：</b>{exp_open_low:.2f} ~ {exp_open_high:.2f} (+{base_open_pct}%起)</div>"
-    html += "<hr style='margin:4px 0; border-top:1px dashed #ddd;'>"
-    html += "<div class='plan-item'>1. <b>弱转强：</b>竞价达标，开盘不破均线 👉 买入。</div>"
-    html += "<div class='plan-item'>2. <b>不及预期：</b>低开/平开，无量下杀 👉 卖出。</div>"
+    # 场景1：连板接力 / 龙头 / 情绪 (看竞价和开盘)
+    if "连板" in strategy_name or "龙头" in strategy_name or "情绪" in strategy_name:
+        target_auction_amt = max_amount_60d * 0.05
+        base_open_pct = 2.0 if turnover < 10 else 4.0 
+        exp_open_low = current_price * (1 + base_open_pct/100)
+        exp_open_high = current_price * (1 + (base_open_pct+4)/100)
+        
+        html += f"<div class='plan-item'>🎯 <b>竞价目标：</b><span class='highlight-money'>{format_money(target_auction_amt)}</span> (天量5%)</div>"
+        html += f"<div class='plan-item'>📊 <b>理想开盘：</b>{exp_open_low:.2f}~{exp_open_high:.2f} (+{base_open_pct:.0f}%起)</div>"
+        html += "<hr style='margin:4px 0; border-top:1px dashed #ddd;'>"
+        html += "<div class='plan-item'>1. <b>弱转强：</b>竞价达标，开盘不破均线 👉 买入。</div>"
+        html += "<div class='plan-item'>2. <b>不及预期：</b>低开/平开，无量下杀 👉 卖出。</div>"
+    
+    # 场景2：趋势低吸 / 涨停回调 (看均线支撑)
+    elif "低吸" in strategy_name or "回调" in strategy_name or "趋势" in strategy_name:
+        # 计算支撑位
+        support_price = ma10 if ma10 > 0 else (ma5 if ma5 > 0 else current_price * 0.95)
+        buy_zone_high = support_price * 1.01
+        buy_zone_low = support_price * 0.99
+        
+        html += f"<div class='plan-item'>🛡️ <b>关键支撑：</b><span class='highlight-support'>{support_price:.2f}</span> (10日线)</div>"
+        html += f"<div class='plan-item'>🎯 <b>伏击区间：</b>{buy_zone_low:.2f} ~ {buy_zone_high:.2f}</div>"
+        html += "<hr style='margin:4px 0; border-top:1px dashed #ddd;'>"
+        html += "<div class='plan-item'>1. <b>黄金坑：</b>急跌缩量回踩支撑位 👉 分批低吸。</div>"
+        html += "<div class='plan-item'>2. <b>破位风险：</b>有效跌破支撑位且无法收回 👉 止损。</div>"
+    
+    # 场景3：自动/其他
+    else:
+        html += "<div class='plan-item'>🤖 暂无特定战法，请观察盘口资金流向。</div>"
+        
     return html
 
 def prefetch_all_data(stock_codes):
     results = {}
-    with ThreadPoolExecutor(max_workers=3) as executor: # 降低并发防卡死
+    with ThreadPoolExecutor(max_workers=3) as executor: 
         future_to_code = {executor.submit(get_stock_history_metrics, code): code for code in stock_codes}
         for future in as_completed(future_to_code):
             code = future_to_code[future]
@@ -512,6 +527,11 @@ if not df.empty:
                 
                 hist_df, cost_low, zt_count, _, _, max_amt_60d, last_to = batch_data.get(code, (None, 0, 0, False, 0, 0, 0))
                 
+                # 获取均线数据用于推演
+                ma5 = hist_df.iloc[-1]['MA5'] if hist_df is not None else 0
+                ma10 = hist_df.iloc[-1]['MA10'] if hist_df is not None else 0
+                ma20 = hist_df.iloc[-1]['MA20'] if hist_df is not None else 0
+                
                 ai_advice, ai_style, badge_style = evaluate_strategy_realtime(assigned_strategy, info, hist_df, cost_low, zt_count, 0, max_amt_60d, last_to)
                 
                 with cols[j]:
@@ -545,8 +565,9 @@ if not df.empty:
                         </div>
                         """, unsafe_allow_html=True)
                         
+                        # 🔥🔥🔥 全策略差异化推演 🔥🔥🔥
                         with st.expander("🎲 操盘推演"):
-                            st.markdown(generate_plan_details(code, price, pre_close, max_amt_60d, last_to), unsafe_allow_html=True)
+                            st.markdown(generate_plan_details(assigned_strategy, code, price, pre_close, max_amt_60d, last_to, ma5, ma10, ma20), unsafe_allow_html=True)
 
                         st.markdown('<div style="height:5px"></div>', unsafe_allow_html=True)
                         if st.button("📈 看图", key=f"btn_{code}"): view_chart_modal(code, name)
