@@ -18,17 +18,23 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 尝试连接 Google Sheets (云端同步) ---
-try:
-    from streamlit_gsheets import GSheetsConnection
-    # 检查是否配置了 secrets
-    if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
-        USE_CLOUD_DB = True
+# 诊断模式：不隐藏错误
+import toml
+from streamlit_gsheets import GSheetsConnection # 如果这行报错，说明 pip install 没成功
+
+# 检查 secrets 是否读取成功
+if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
+    st.success("✅ Secrets 配置读取成功！")
+    try:
         conn = st.connection("gsheets", type=GSheetsConnection)
-    else:
+        USE_CLOUD_DB = True
+        st.success("✅ Google Sheets 连接成功！")
+    except Exception as e:
         USE_CLOUD_DB = False
-except:
+        st.error(f"❌ 连接报错: {e}")
+else:
     USE_CLOUD_DB = False
+    st.warning("⚠️ 未检测到 Secrets 配置，请检查 .streamlit/secrets.toml 位置")
 
 # --- 🎨 CSS 样式 ---
 st.markdown("""
