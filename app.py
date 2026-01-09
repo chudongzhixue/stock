@@ -18,23 +18,17 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 诊断模式：不隐藏错误
-import toml
-from streamlit_gsheets import GSheetsConnection # 如果这行报错，说明 pip install 没成功
-
-# 检查 secrets 是否读取成功
-if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
-    st.success("✅ Secrets 配置读取成功！")
-    try:
-        conn = st.connection("gsheets", type=GSheetsConnection)
+# --- 尝试连接 Google Sheets (云端同步) ---
+try:
+    from streamlit_gsheets import GSheetsConnection
+    # 检查是否配置了 secrets
+    if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
         USE_CLOUD_DB = True
-        st.success("✅ Google Sheets 连接成功！")
-    except Exception as e:
+        conn = st.connection("gsheets", type=GSheetsConnection)
+    else:
         USE_CLOUD_DB = False
-        st.error(f"❌ 连接报错: {e}")
-else:
+except:
     USE_CLOUD_DB = False
-    st.warning("⚠️ 未检测到 Secrets 配置，请检查 .streamlit/secrets.toml 位置")
 
 # --- 🎨 CSS 样式 ---
 st.markdown("""
@@ -128,13 +122,29 @@ def load_data():
     
     if USE_CLOUD_DB:
         try:
-            # 从 Google Sheets 读取 (Worksheet 0: stock_config)
+            # ttl=10 防止触发 Google API 频率限制
             df = conn.read(worksheet="stock_config", ttl=10)
-            df['code'] = df['code'].astype(str).str.zfill(6) # 确保代码是6位字符串
+            
+            # 🔥🔥🔥 修复核心：清理股票代码格式 🔥🔥🔥
+            # 1. 转为字符串 2. 删掉 .0 3. 补齐6位
+            df['code'] = df['code'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(6)
+            
+            # 🔥🔥🔥 数据清洗：防止空值报错 🔥🔥🔥
+            # 填充文本列
+            for col in ['name', 'group', 'strategy', 'note']:
+                if col in df.columns:
+                    df[col] = df[col].fillna("")
+            
+            # 填充数字列
+            for col in ['s1', 's2', 'r1', 'r2']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
+            
             # 补全缺失列
             for col in default_cols:
                 if col not in df.columns:
                     df[col] = 0.0 if col not in ['name','group','strategy','note'] else ""
+                    
             return df[default_cols]
         except Exception as e:
             st.error(f"云端读取失败，降级为本地模式: {e}")
@@ -183,7 +193,7 @@ def load_train_data():
     
     if USE_CLOUD_DB:
         try:
-            df = conn.read(worksheet="ai_dataset", ttl=10)
+            df = conn.read(worksheet="ai_dataset", ttl=10) # 这里的 ttl 也要加上
             df['code'] = df['code'].astype(str).str.zfill(6)
             return df
         except: pass
@@ -499,7 +509,7 @@ def prefetch_all_data(stock_codes):
 # --- 主界面 ---
 st.title("Alpha 游资系统 Pro + AI")
 
-# 🔥 修复的核心：在这里初始化 trading_active
+# 🔥 核心初始化：确保 trading_active 有定义
 trading_active, trading_status_msg = is_trading_time()
 
 status_msg = "☁️ 云端同步中" if USE_CLOUD_DB else "💾 本地模式 (请注意备份)"
@@ -586,7 +596,6 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
                     st.success(f"识别结果：{zt}连板")
     
     with st.form("add"):
-        # 确保列名明确
         col1, col2 = st.columns(2)
         s1 = col1.number_input("支撑1", value=float(st.session_state.calc_s1))
         s2 = col1.number_input("支撑2", value=float(st.session_state.calc_s2))
