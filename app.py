@@ -41,11 +41,10 @@ st.markdown("""
         .stock-name { font-size: 1.1rem; font-weight: bold; color: #222; }
         .stock-code { font-size: 0.8rem; color: #888; margin-left: 5px; }
         
-        /* 策略标签 */
         .strategy-badge { 
             padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white; 
             display: inline-block; vertical-align: middle; margin-right: 4px; margin-bottom: 4px;
-            background-color: #333; /* 默认黑 */
+            background-color: #333;
         }
         .bg-dragon { background: linear-gradient(45deg, #d32f2f, #ef5350); }
         .bg-relay { background: linear-gradient(45deg, #f57c00, #ffb74d); }
@@ -92,7 +91,6 @@ VIDEO_DIR = 'training_videos'
 
 if not os.path.exists(VIDEO_DIR): os.makedirs(VIDEO_DIR)
 
-# 🔥 核心：标准化战法定义
 STRATEGY_OPTIONS = [
     "🤖 自动判断 (Auto)",
     "🐲 龙头掘金 (机构波段)",
@@ -108,22 +106,14 @@ def save_data(df): df.to_csv(DATA_FILE, index=False)
 
 def load_data():
     if not os.path.exists(DATA_FILE):
-        # 新增 strategy 列
         df = pd.DataFrame(columns=["code", "name", "s1", "s2", "r1", "r2", "group", "strategy", "note"])
         df.to_csv(DATA_FILE, index=False)
         return df
-    
     df = pd.read_csv(DATA_FILE, dtype={"code": str})
-    
-    # 兼容性升级：如果旧文件没有 strategy 列，自动补全
-    if "strategy" not in df.columns:
-        df["strategy"] = "🤖 自动判断 (Auto)"
-        save_data(df)
-        
+    if "strategy" not in df.columns: df["strategy"] = "🤖 自动判断 (Auto)"; save_data(df)
     expected_cols = ["code", "name", "s1", "s2", "r1", "r2", "group", "strategy", "note"]
     for col in expected_cols:
         if col not in df.columns: df[col] = 0.0
-    
     df = df[expected_cols]
     df['code'] = df['code'].str.strip()
     df.drop_duplicates(subset=['code'], keep='last', inplace=True)
@@ -142,30 +132,17 @@ def load_train_data():
 def save_train_record_with_video(code, name, price, cost, strategy, video_file, note):
     df = load_train_data()
     today = datetime.now().strftime("%Y-%m-%d")
-    
     video_path = ""
     if video_file is not None:
         file_ext = video_file.name.split('.')[-1]
         safe_name = f"{today}_{code}_{strategy}.{file_ext}"
         video_path = os.path.join(VIDEO_DIR, safe_name)
-        with open(video_path, "wb") as f:
-            f.write(video_file.getbuffer())
-    
+        with open(video_path, "wb") as f: f.write(video_file.getbuffer())
     new_record = {
-        "record_date": today,
-        "code": code,
-        "name": name,
-        "strategy_type": strategy,
-        "price_at_entry": price,
-        "cost_at_entry": cost,
-        "video_path": video_path,
-        "note": note,
-        "next_day_open_pct": 0.0, 
-        "next_day_high_pct": 0.0, 
-        "next_day_close_pct": 0.0, 
-        "result_label": "⏳ 待验证"
+        "record_date": today, "code": code, "name": name, "strategy_type": strategy,
+        "price_at_entry": price, "cost_at_entry": cost, "video_path": video_path, "note": note,
+        "next_day_open_pct": 0.0, "next_day_high_pct": 0.0, "next_day_close_pct": 0.0, "result_label": "⏳ 待验证"
     }
-    
     df = df[~((df['record_date'] == today) & (df['code'] == code))]
     df = pd.concat([df, pd.DataFrame([new_record])], ignore_index=True)
     df.to_csv(TRAIN_DATA_FILE, index=False)
@@ -176,7 +153,6 @@ def auto_label_data():
     if df.empty: return "无数据"
     count = 0
     today_str = datetime.now().strftime("%Y-%m-%d")
-    
     for index, row in df.iterrows():
         if row['result_label'] != "⏳ 待验证" or row['record_date'] == today_str: continue
         try:
@@ -214,8 +190,7 @@ def is_trading_time():
     current_time = now.time()
     am_start, am_end = dt_time(9, 15), dt_time(11, 30)
     pm_start, pm_end = dt_time(13, 0), dt_time(15, 0)
-    if (am_start <= current_time <= am_end) or (pm_start <= current_time <= pm_end):
-        return True, "交易中"
+    if (am_start <= current_time <= am_end) or (pm_start <= current_time <= pm_end): return True, "交易中"
     return False, "非交易时间"
 
 def get_realtime_quotes(code_list):
@@ -257,6 +232,7 @@ def get_stock_history_metrics(code):
                 y_data.rename(columns={'Date': '日期', 'Open': '开盘', 'High': '最高', 'Low': '最低', 'Close': '收盘', 'Volume': '成交量'}, inplace=True)
                 y_data['涨跌幅'] = y_data['收盘'].pct_change() * 100
                 y_data['成交额'] = y_data['收盘'] * y_data['成交量'] 
+                y_data['换手率'] = 0.0
                 stock_df = y_data
         except: pass
 
@@ -287,9 +263,13 @@ def get_stock_history_metrics(code):
             max_streak = max(max_streak, curr_str)
             recent_60 = stock_df.tail(60)
             max_amount_60d = recent_60['成交额'].max()
-            return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False, max_streak, max_amount_60d
-        except: return None, 0, 0, False, 0, 0
-    return None, 0, 0, False, 0, 0
+            
+            # 🔥 获取换手率
+            last_turnover = stock_df.iloc[-1]['换手率'] if '换手率' in stock_df.columns else 0.0
+            
+            return stock_df, avg_cost, zt_count, check_df.iloc[-2]['is_zt'] if len(check_df) > 1 else False, max_streak, max_amount_60d, last_turnover
+        except: return None, 0, 0, False, 0, 0, 0
+    return None, 0, 0, False, 0, 0, 0
 
 def format_money(num):
     if pd.isna(num) or num == 0: return "N/A"
@@ -298,11 +278,8 @@ def format_money(num):
     if num > 10000: return f"{num/10000:.2f}万"
     return f"{num:.2f}"
 
-# --- 🔥 AI 实时操盘大脑 (根据绑定战法给出建议) ---
-def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_count, max_streak, max_amount_60d):
-    """
-    根据用户绑定的战法，进行差异化判断
-    """
+# --- 🔥 AI 实时操盘大脑 (增强版规则) ---
+def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_count, max_streak, max_amount_60d, turnover):
     if history_df is None or history_df.empty: return "数据不足", "bg-auto", ""
     
     price = info['price']
@@ -310,7 +287,6 @@ def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_cou
     pre_close = info['pre_close']
     pct_chg = ((price - pre_close) / pre_close) * 100
     open_pct = ((open_p - pre_close) / pre_close) * 100
-    
     ma5 = history_df.iloc[-1]['MA5']
     ma10 = history_df.iloc[-1]['MA10']
     ma20 = history_df.iloc[-1]['MA20']
@@ -319,81 +295,54 @@ def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_cou
     style = "advice-hold"
     badge_style = "bg-auto"
     
-    # ----------------------------------------------------
-    # 策略 1: 🐲 龙头掘金 (机构波段)
-    # ----------------------------------------------------
+    # 策略 1: 🐲 龙头掘金
     if "龙头掘金" in strategy_name:
         badge_style = "bg-dragon"
-        # 逻辑：在主力成本线上方，均线多头排列，适合波段持有
         if price > avg_cost and price > ma10:
             if pct_chg < -3: advice = "🟢 回调洗盘: 可分批吸纳"; style = "advice-buy"
             elif pct_chg > 5: advice = "🔴 加速拉升: 持股"; style = "advice-hold"
             else: advice = "🔵 趋势良好: 持仓"; style = "advice-hold"
-        elif price < ma10 and price > ma20:
-            advice = "⚠️ 跌破10日线: 减仓防守"; style = "advice-sell"
-        else:
-            advice = "🚫 破位: 离场规避"; style = "advice-sell"
+        elif price < ma10: advice = "⚠️ 破10日线: 减仓"; style = "advice-sell"
 
-    # ----------------------------------------------------
-    # 策略 2: 🚀 连板接力 (1进2/2进3)
-    # ----------------------------------------------------
+    # 策略 2: 🚀 连板接力 (规则增强)
     elif "连板接力" in strategy_name:
         badge_style = "bg-relay"
-        # 逻辑：看开盘强度和分时承接
-        if open_pct > 2 and price > open_p:
+        # 🔥 新增：换手率影响判断
+        # 如果昨日换手率极高(>15%)，今日必须高开>3%才算弱转强
+        threshold_open = 3.0 if turnover > 15 else 1.0
+        
+        if open_pct > threshold_open and price > open_p:
             if pct_chg > 9.5: advice = "🔒 涨停锁仓"; style = "advice-hold"
             else: advice = "🔥 弱转强: 确认买点"; style = "advice-buy"
-        elif open_pct < -1:
-            advice = "❄️ 低开不及预期: 离场"; style = "advice-sell"
+        elif open_pct < -2:
+            advice = "❄️ 严重不及预期: 离场"; style = "advice-sell"
         elif price < pre_close:
             advice = "🟢 水下震荡: 观望"; style = "advice-sell"
         else:
             advice = "🔵 分歧震荡: 等换手"; style = "advice-hold"
 
-    # ----------------------------------------------------
-    # 策略 3: 📉 涨停回调 (低吸)
-    # ----------------------------------------------------
+    # 策略 3: 📉 涨停回调
     elif "涨停回调" in strategy_name:
         badge_style = "bg-low"
-        # 逻辑：急跌到均线或支撑位
         dist_ma10 = (price - ma10) / ma10
-        dist_ma20 = (price - ma20) / ma20
-        
-        if -0.02 < dist_ma10 < 0.02:
-            advice = "🎯 回踩10日线: 低吸博弈"; style = "advice-buy"
-        elif -0.02 < dist_ma20 < 0.02:
-            advice = "🎯 回踩20日线: 黄金坑"; style = "advice-buy"
-        elif price < ma20:
-            advice = "🚫 跌破20日线: 止损"; style = "advice-sell"
-        else:
-            advice = "🔵 等待回落"; style = "advice-hold"
+        if -0.02 < dist_ma10 < 0.02: advice = "🎯 回踩10日线: 低吸博弈"; style = "advice-buy"
+        elif price < ma10: advice = "🚫 破位: 止损"; style = "advice-sell"
+        else: advice = "🔵 等待回落"; style = "advice-hold"
 
-    # ----------------------------------------------------
-    # 策略 4: 🌊 趋势低吸 (5日/10日线)
-    # ----------------------------------------------------
+    # 策略 4: 🌊 趋势低吸
     elif "趋势低吸" in strategy_name:
         badge_style = "bg-trend"
-        # 逻辑：严格依托5日线
-        if price > ma5:
-            advice = "🔴 5日线上: 持股"; style = "advice-hold"
-        elif price < ma5 and price > ma10:
-            advice = "⚠️ 破5日线: 减仓/回补"; style = "advice-hold"
-        else:
-            advice = "🟢 破位: 清仓"; style = "advice-sell"
+        if price > ma5: advice = "🔴 5日线上: 持股"; style = "advice-hold"
+        elif price < ma5 and price > ma10: advice = "⚠️ 破5日线: 减仓"; style = "advice-sell"
+        else: advice = "🟢 破位: 清仓"; style = "advice-sell"
 
-    # ----------------------------------------------------
-    # 策略 5: 🔥 短线情绪 (跟随大游资)
-    # ----------------------------------------------------
+    # 策略 5: 🔥 短线情绪
     elif "短线情绪" in strategy_name:
         badge_style = "bg-mood"
-        # 逻辑：波动大，只做确定性
-        if pct_chg > 7: advice = "🔥 情绪高潮: 获利了结"; style = "advice-sell"
-        elif pct_chg < -5: advice = "❄️ 情绪冰点: 尝试核按钮吸"; style = "advice-buy"
+        if pct_chg > 7: advice = "🔥 情绪高潮: 获利"; style = "advice-sell"
+        elif pct_chg < -5: advice = "❄️ 冰点: 核按钮吸"; style = "advice-buy"
         else: advice = "🔵 跟随盘口"; style = "advice-hold"
 
-    # ----------------------------------------------------
-    # 自动判断 (默认) - 使用之前的通用逻辑
-    # ----------------------------------------------------
     else:
         badge_style = "bg-auto"
         if zt_count >= 2: advice = f"🚀 {zt_count}连板持筹"; style = "advice-hold"
@@ -402,27 +351,29 @@ def evaluate_strategy_realtime(strategy_name, info, history_df, avg_cost, zt_cou
 
     return advice, style, badge_style
 
-def generate_plan_details(code, current_price, pre_close, max_amount_60d):
-    """生成的右侧预案详情"""
+def generate_plan_details(code, current_price, pre_close, max_amount_60d, turnover):
+    """生成的右侧预案详情 (增强版)"""
     target_auction_amt = max_amount_60d * 0.05
-    exp_open_low = current_price * 1.02
-    exp_open_high = current_price * 1.06
+    # 🔥 理想开盘根据换手率调整
+    base_open_pct = 2.0 if turnover < 10 else 4.0 
+    exp_open_low = current_price * (1 + base_open_pct/100)
+    exp_open_high = current_price * (1 + (base_open_pct+4)/100)
     
     html = f"<div class='plan-item'>🎯 <b>竞价目标：</b><span class='highlight-money'>{format_money(target_auction_amt)}</span></div>"
-    html += f"<div class='plan-item'>📊 <b>明日理想开盘：</b>{exp_open_low:.2f} ~ {exp_open_high:.2f}</div>"
+    html += f"<div class='plan-item'>📊 <b>理想开盘：</b>{exp_open_low:.2f} ~ {exp_open_high:.2f} (+{base_open_pct}%起)</div>"
     html += "<hr style='margin:4px 0; border-top:1px dashed #ddd;'>"
-    html += "<div class='plan-item'>1. <b>弱转强：</b>高开>3%，竞价达标，开盘不破均线 👉 买入。</div>"
+    html += "<div class='plan-item'>1. <b>弱转强：</b>竞价达标，开盘不破均线 👉 买入。</div>"
     html += "<div class='plan-item'>2. <b>不及预期：</b>低开/平开，无量下杀 👉 卖出。</div>"
     return html
 
 def prefetch_all_data(stock_codes):
     results = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor: # 降低并发防卡死
         future_to_code = {executor.submit(get_stock_history_metrics, code): code for code in stock_codes}
         for future in as_completed(future_to_code):
             code = future_to_code[future]
             try: results[code] = future.result()
-            except: results[code] = (None, 0, 0, False, 0, 0)
+            except: results[code] = (None, 0, 0, False, 0, 0, 0)
     return results
 
 # --- 主界面 ---
@@ -436,7 +387,6 @@ if st.sidebar.button("🧹 强制刷新数据"):
     st.cache_data.clear()
     st.rerun()
 
-# 🔥 AI 数据收集区
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🧠 AI 模型训练")
 if st.sidebar.button("🔄 自动回填历史结果"):
@@ -456,7 +406,7 @@ with st.sidebar.form("ai_data_form"):
             q_data = get_realtime_quotes([train_code])
             curr_price = q_data.get(train_code, {}).get('price', 0)
             c_name = q_data.get(train_code, {}).get('name', '未知')
-            _, cost, _, _, _, _ = get_stock_history_metrics(train_code)
+            _, cost, _, _, _, _, _ = get_stock_history_metrics(train_code)
             if curr_price > 0:
                 save_train_record_with_video(train_code, c_name, curr_price, cost, train_strategy, uploaded_video, train_note)
                 st.toast(f"✅ 已记录：{c_name}")
@@ -467,7 +417,6 @@ if not train_df.empty:
     with st.sidebar.expander("📊 查看数据集", expanded=False):
         st.dataframe(train_df[['record_date', 'name', 'strategy_type']], hide_index=True)
 
-# 备份
 st.sidebar.markdown("---")
 with st.sidebar.expander("📂 数据备份", expanded=False):
     if os.path.exists(DATA_FILE):
@@ -482,7 +431,6 @@ st.sidebar.markdown("---")
 
 df = load_data()
 
-# 添加股票 (含战法选择)
 with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
     code_in = st.text_input("代码 (6位数)", key="cin").strip()
     if 'calc_s1' not in st.session_state: 
@@ -490,7 +438,7 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
     if st.button("⚡ 智能计算"):
         if code_in:
             with st.spinner("计算中..."):
-                hist, cost, zt, _, max_streak, _ = get_stock_history_metrics(code_in)
+                hist, cost, zt, _, max_streak, _, _ = get_stock_history_metrics(code_in)
                 if hist is not None:
                     last = hist.iloc[-1]
                     pivot = (last['最高']+last['最低']+last['收盘'])/3
@@ -506,8 +454,6 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
         s2=c1.number_input("支撑2", value=float(st.session_state.calc_s2))
         r1=c2.number_input("压力1", value=float(st.session_state.calc_r1))
         r2=c2.number_input("压力2", value=float(st.session_state.calc_r2))
-        
-        # 🔥 新增：添加股票时直接绑定战法
         new_grp = st.selectbox("分组", ["默认"] + [g for g in df['group'].unique() if g!="默认"])
         new_strategy = st.selectbox("绑定战法", STRATEGY_OPTIONS)
         note=st.text_area("笔记")
@@ -519,10 +465,8 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
                 new_entry = {"code":code_in, "name":name, "s1":s1, "s2":s2, "r1":r1, "r2":r2, "group":new_grp, "strategy":new_strategy, "note":note}
                 if code_in in df.code.values:
                     for k,v in new_entry.items(): df.loc[df.code==code_in, k] = v
-                else:
-                    df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
-                save_data(df)
-                st.rerun()
+                else: df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+                save_data(df); st.rerun()
 
 @st.dialog("📈 个股详情", width="large")
 def view_chart_modal(code, name):
@@ -558,7 +502,7 @@ if not df.empty:
             chunk = rows[i:i+4]
             for j, row in enumerate(chunk):
                 code = row['code']
-                assigned_strategy = row.get('strategy', "🤖 自动判断 (Auto)") # 获取该股绑定的战法
+                assigned_strategy = row.get('strategy', "🤖 自动判断 (Auto)")
                 info = quotes.get(code, {})
                 price = info.get('price', 0)
                 pre_close = info.get('pre_close', 0)
@@ -566,10 +510,9 @@ if not df.empty:
                 chg = ((price-pre_close)/pre_close)*100 if pre_close else 0
                 price_color = "price-up" if chg > 0 else ("price-down" if chg < 0 else "price-gray")
                 
-                hist_df, cost_low, zt_count, _, _, max_amt_60d = batch_data.get(code, (None, 0, 0, False, 0, 0))
+                hist_df, cost_low, zt_count, _, _, max_amt_60d, last_to = batch_data.get(code, (None, 0, 0, False, 0, 0, 0))
                 
-                # 🔥 调用新的 AI 实时判定引擎
-                ai_advice, ai_style, badge_style = evaluate_strategy_realtime(assigned_strategy, info, hist_df, cost_low, zt_count, 0, max_amt_60d)
+                ai_advice, ai_style, badge_style = evaluate_strategy_realtime(assigned_strategy, info, hist_df, cost_low, zt_count, 0, max_amt_60d, last_to)
                 
                 with cols[j]:
                     with st.container(border=True):
@@ -577,28 +520,19 @@ if not df.empty:
                         with c1: st.markdown(f"<div style='white-space:nowrap;overflow:hidden;'><span class='stock-name'>{name}</span> <span class='stock-code'>{code}</span></div>", unsafe_allow_html=True)
                         with c2:
                             with st.popover("🏷️"):
-                                # 允许在卡片上修改分组和战法
                                 n_grp = st.selectbox("分组", all_groups, key=f"ng_{code}", index=all_groups.index(group) if group in all_groups else 0)
                                 n_strat = st.selectbox("战法", STRATEGY_OPTIONS, key=f"ns_{code}", index=STRATEGY_OPTIONS.index(assigned_strategy) if assigned_strategy in STRATEGY_OPTIONS else 0)
                                 if st.button("更新", key=f"up_{code}"):
-                                    df.loc[df.code==code, 'group'] = n_grp
-                                    df.loc[df.code==code, 'strategy'] = n_strat
-                                    save_data(df)
-                                    st.rerun()
+                                    df.loc[df.code==code, 'group'] = n_grp; df.loc[df.code==code, 'strategy'] = n_strat; save_data(df); st.rerun()
                         with c3:
                             if st.button("🗑️", key=f"del_{code}"): delete_single_stock(code); st.rerun()
 
                         st.markdown(f"<div class='big-price {price_color}'>{price:.2f}</div>", unsafe_allow_html=True)
                         zt_badge = f"<span style='background:#ff0000;color:white;padding:1px 4px;border-radius:3px;font-size:0.8rem;margin-left:5px'>{zt_count}连板</span>" if zt_count>=2 else ""
                         st.markdown(f"<div style='font-weight:bold; margin-bottom:8px;'>{chg:+.2f}% {zt_badge}</div>", unsafe_allow_html=True)
-                        
-                        # 显示绑定的战法标签
                         st.markdown(f"<span class='strategy-badge {badge_style}'>{assigned_strategy.split(' ')[0]}</span>", unsafe_allow_html=True)
                         
-                        # 显示 AI 实时建议
-                        if is_trading_time()[0]:
-                            st.markdown(f"<div class='advice-box {ai_style}'>{ai_advice}</div>", unsafe_allow_html=True)
-                        
+                        if is_trading_time()[0]: st.markdown(f"<div class='advice-box {ai_style}'>{ai_advice}</div>", unsafe_allow_html=True)
                         if cost_low>0: st.markdown(f"<div class='cost-range-box'>主力: {cost_low:.2f}</div>", unsafe_allow_html=True)
                         
                         r1, r2, s1, s2 = float(row['r1']), float(row['r2']), float(row['s1']), float(row['s2'])
@@ -611,9 +545,8 @@ if not df.empty:
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # 战法推演折叠
                         with st.expander("🎲 操盘推演"):
-                            st.markdown(generate_plan_details(code, price, pre_close, max_amt_60d), unsafe_allow_html=True)
+                            st.markdown(generate_plan_details(code, price, pre_close, max_amt_60d, last_to), unsafe_allow_html=True)
 
                         st.markdown('<div style="height:5px"></div>', unsafe_allow_html=True)
                         if st.button("📈 看图", key=f"btn_{code}"): view_chart_modal(code, name)
