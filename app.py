@@ -18,20 +18,31 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 诊断代码 (测试完后可改回) ---
+# --- 诊断模式 (请替换原有的 try...except 代码块) ---
 import toml
-# 如果下面这行报错，说明 requirements.txt 没生效
-from streamlit_gsheets import GSheetsConnection 
+# 1. 测试库是否安装
+try:
+    from streamlit_gsheets import GSheetsConnection
+    st.success("✅ 步骤1: 库文件 st-gsheets-connection 加载成功")
+except ImportError:
+    st.error("❌ 步骤1 失败: 缺少 st-gsheets-connection 库！请检查 requirements.txt")
+    st.stop()
 
-# 检查 secrets
+# 2. 测试 Secrets 是否存在
 if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
-    # 尝试连接，不隐藏错误
+    st.success("✅ 步骤2: Secrets 配置读取成功")
+    # 3. 尝试建立连接 (不使用 try 保护，让它直接炸出来)
     conn = st.connection("gsheets", type=GSheetsConnection)
+    st.info("🔄 步骤3: 正在尝试连接 Google... (如果卡在这里说明网络或配额问题)")
+    
+    # 尝试读取数据 (ttl=0 强制刷新)
+    df_test = conn.read(worksheet="stock_config", ttl=0)
+    st.success(f"✅ 步骤4: 连接成功！读取到 {len(df_test)} 行数据")
     USE_CLOUD_DB = True
-    st.success("✅ 诊断模式：Google Sheets 连接成功！")
 else:
+    st.error("❌ 步骤2 失败: 未在 Streamlit Cloud 后台检测到 Secrets 配置！")
+    st.info("请去网页右下角 Manage app -> Settings -> Secrets 检查是否填入了内容")
     USE_CLOUD_DB = False
-    st.error("❌ 诊断模式：未检测到 Secrets 配置，请检查 Streamlit Cloud 后台设置")
 
 # --- 🎨 CSS 样式 ---
 st.markdown("""
