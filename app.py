@@ -18,17 +18,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 尝试连接 Google Sheets (云端同步) ---
-try:
-    from streamlit_gsheets import GSheetsConnection
-    # 检查是否配置了 secrets
-    if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
-        USE_CLOUD_DB = True
-        conn = st.connection("gsheets", type=GSheetsConnection)
-    else:
-        USE_CLOUD_DB = False
-except:
+# --- 诊断代码 (测试完后可改回) ---
+import toml
+# 如果下面这行报错，说明 requirements.txt 没生效
+from streamlit_gsheets import GSheetsConnection 
+
+# 检查 secrets
+if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
+    # 尝试连接，不隐藏错误
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    USE_CLOUD_DB = True
+    st.success("✅ 诊断模式：Google Sheets 连接成功！")
+else:
     USE_CLOUD_DB = False
+    st.error("❌ 诊断模式：未检测到 Secrets 配置，请检查 Streamlit Cloud 后台设置")
 
 # --- 🎨 CSS 样式 ---
 st.markdown("""
