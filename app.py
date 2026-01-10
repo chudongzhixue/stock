@@ -18,30 +18,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 诊断模式 (请替换原有的 try...except 代码块) ---
-import toml
-# 1. 测试库是否安装
+# --- 尝试连接 Google Sheets (云端同步) ---
 try:
     from streamlit_gsheets import GSheetsConnection
-    st.success("✅ 步骤1: 库文件 st-gsheets-connection 加载成功")
-except ImportError:
-    st.error("❌ 步骤1 失败: 缺少 st-gsheets-connection 库！请检查 requirements.txt")
-    st.stop()
-
-# 2. 测试 Secrets 是否存在
-if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
-    st.success("✅ 步骤2: Secrets 配置读取成功")
-    # 3. 尝试建立连接 (不使用 try 保护，让它直接炸出来)
-    conn = st.connection("gsheets", type=GSheetsConnection)
-    st.info("🔄 步骤3: 正在尝试连接 Google... (如果卡在这里说明网络或配额问题)")
-    
-    # 尝试读取数据 (ttl=0 强制刷新)
-    df_test = conn.read(worksheet="stock_config", ttl=0)
-    st.success(f"✅ 步骤4: 连接成功！读取到 {len(df_test)} 行数据")
-    USE_CLOUD_DB = True
-else:
-    st.error("❌ 步骤2 失败: 未在 Streamlit Cloud 后台检测到 Secrets 配置！")
-    st.info("请去网页右下角 Manage app -> Settings -> Secrets 检查是否填入了内容")
+    # 检查是否配置了 secrets
+    if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
+        USE_CLOUD_DB = True
+        conn = st.connection("gsheets", type=GSheetsConnection)
+    else:
+        USE_CLOUD_DB = False
+except:
     USE_CLOUD_DB = False
 
 # --- 🎨 CSS 样式 ---
@@ -207,7 +193,7 @@ def load_train_data():
     
     if USE_CLOUD_DB:
         try:
-            df = conn.read(worksheet="ai_dataset", ttl=10) # 这里的 ttl 也要加上
+            df = conn.read(worksheet="ai_dataset", ttl=10)
             df['code'] = df['code'].astype(str).str.zfill(6)
             return df
         except: pass
@@ -610,6 +596,7 @@ with st.sidebar.expander("➕ 添加/编辑 个股", expanded=True):
                     st.success(f"识别结果：{zt}连板")
     
     with st.form("add"):
+        # 确保列名明确
         col1, col2 = st.columns(2)
         s1 = col1.number_input("支撑1", value=float(st.session_state.calc_s1))
         s2 = col1.number_input("支撑2", value=float(st.session_state.calc_s2))
