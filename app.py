@@ -506,6 +506,19 @@ def prefetch_all_data(stock_codes):
             except: results[code] = (None, 0, 0, False, 0, 0, 0)
     return results
 
+# 🔥🔥🔥 关键修复：把这个函数提到主循环之前！
+@st.dialog("📈 个股详情", width="large")
+def view_chart_modal(code, name):
+    st.subheader(f"{name} ({code})")
+    import time
+    ts = int(time.time())
+    mid = "1" if code.startswith(('6','5','9')) else "0"
+    t1, t2 = st.tabs(["分时图", "日线图"])
+    with t1:
+        st.image(f"https://webquotepic.eastmoney.com/GetPic.aspx?nid={mid}.{code}&imageType=r&t={ts}", use_container_width=True)
+    with t2:
+        st.image(f"https://webquotepic.eastmoney.com/GetPic.aspx?nid={mid}.{code}&imageType=k&t={ts}", use_container_width=True)
+
 # --- 主界面 ---
 st.title("Alpha 游资系统 Pro + AI")
 
