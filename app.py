@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 页面基础设置 ---
 st.set_page_config(
-    page_title="Alpha 游资系统 (双引擎)",
+    page_title="Alpha 游资系统 (修复版)",
     page_icon="🐲",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -117,7 +117,7 @@ def save_learned_logic(record):
         except: pass
     df.to_csv(LEARNED_LOGIC_FILE, index=False)
 
-# --- 辅助函数 ---
+# --- 辅助函数 (时间/格式) ---
 def is_trading_time():
     now = datetime.utcnow() + timedelta(hours=8)
     if now.weekday() >= 5: return False, "周末休市"
@@ -133,7 +133,30 @@ def get_dist_html(target, current):
     col = "#d9534f" if abs(d)<1.0 else "#f0ad4e" if abs(d)<3.0 else "#999"
     return f"<span style='color:{col}; font-weight:bold;'>({d:+.1f}%)</span>"
 
-# --- 🔥 全维度数据获取 ---
+# --- 🔥 修复：急速行情接口 (Sinajs) ---
+def get_realtime_quotes_fast(code_list):
+    """使用新浪接口批量获取行情，速度极快，不卡顿"""
+    if not code_list: return {}
+    q_codes = [f"{'sh' if c.startswith(('6', '5')) else 'sz'}{c}" for c in code_list]
+    url = f"http://hq.sinajs.cn/list={','.join(q_codes)}"
+    try:
+        r = requests.get(url, headers={'Referer': 'http://finance.sina.com.cn'}, timeout=3)
+        data = {}
+        for line in r.text.split('\n'):
+            if '="' in line:
+                code = line.split('="')[0].split('_')[-1][2:]
+                val = line.split('="')[1].strip('";').split(',')
+                if len(val) > 30:
+                    data[code] = {
+                        "name": val[0],
+                        "price": float(val[3]),
+                        "pre_close": float(val[2]),
+                        "pct": (float(val[3]) - float(val[2])) / float(val[2]) * 100 if float(val[2]) > 0 else 0
+                    }
+        return data
+    except: return {}
+
+# --- 全维度数据获取 (用于AI) ---
 @st.cache_data(ttl=60)
 def get_stock_data_bundle(code):
     bundle = {"daily": None, "minute": None, "info": {}}
@@ -164,19 +187,14 @@ def get_stock_data_bundle(code):
         return bundle
     except: return None
 
-# --- 🔥 核心1：内置硬编码策略引擎 (恢复这个功能！) ---
+# --- 核心策略引擎 ---
 def evaluate_builtin_strategy(strategy, bundle):
     if not bundle or bundle['daily'] is None: return "数据不足", "bg-auto"
-    
-    daily = bundle['daily']
-    info = bundle['info']
-    last = daily.iloc[-1]
-    p = info['price']; pct = info['pct']
+    daily = bundle['daily']; info = bundle['info']
+    last = daily.iloc[-1]; p = info['price']; pct = info['pct']
     ma5 = last['MA5']; ma10 = last['MA10']
     
-    # 默认值
     text = "观察"; badge_class = "bg-auto"
-    
     if "龙头" in strategy:
         badge_class = "bg-dragon"
         if p > ma5 and p > ma10:
@@ -184,22 +202,16 @@ def evaluate_builtin_strategy(strategy, bundle):
             elif pct > 5: text = "🔴 加速: 持"
             else: text = "🔵 趋势良好"
         elif p < ma10: text = "⚠️ 破10日: 减"
-            
     elif "连板" in strategy:
         badge_class = "bg-relay"
         if pct > 9.5: text = "🔒 涨停锁仓"
-        elif p > info['pre_close'] * 1.03: text = "🔥 弱转强: 买"
-        elif p < info['pre_close']: text = "🟢 水下: 观望"
-        
+        elif p > info.get('pre_close', 0) * 1.03: text = "🔥 弱转强: 买"
     elif "回调" in strategy or "低吸" in strategy:
         badge_class = "bg-low"
         if abs((p - ma10)/ma10) < 0.02: text = "🎯 踩10日线: 吸"
         elif p < ma10: text = "🚫 破位: 止"
-        else: text = "🔵 等回落"
-        
     return text, badge_class
 
-# --- 🔥 核心2：AI 动态逻辑执行引擎 ---
 def execute_ai_logic(bundle, logic_code):
     if not bundle or bundle['daily'] is None: return "数据不足", "sig-wait"
     daily_df = bundle['daily']; minute_df = bundle['minute']
@@ -229,30 +241,20 @@ def process_video_comprehensive(file_obj, url, input_type, note):
         with open(temp_path, "wb") as f: f.write(file_obj.getbuffer())
 
     try:
-        status.info("🧠 AI 正在进行【日线趋势+量价+分时】三维建模...")
+        status.info("🧠 AI 正在进行多周期建模...")
         video_upload = genai.upload_file(path=temp_path)
         while video_upload.state.name == "PROCESSING": time.sleep(2); video_upload = genai.get_file(video_upload.name)
         
         system_prompt = """
         你是一位顶级游资操盘手。请分析视频，总结出一套【多周期共振】的交易系统。
-        
         请编写一个 Python 函数 `analyze(daily_df, minute_df)`:
         - daily_df 列名: '收盘','开盘','最高','最低','成交量','MA5','MA10','MA20','VOL_MA5'
-        - minute_df 列名: 'close','open','high','low','volume','MA_PRICE'(均价线)
-        - minute_df 可能为 None (如果未开盘)，需处理。
+        - minute_df 列名: 'close','open','high','low','volume','MA_PRICE'(均价线). 可能为 None.
         
         函数返回元组: (SIGNAL, REASON)
         - SIGNAL: "BUY", "SELL", "WAIT"
         - REASON: 简短中文理由
         
-        示例代码逻辑：
-        def analyze(daily_df, minute_df):
-            last_day = daily_df.iloc[-1]
-            if last_day['收盘'] < last_day['MA5']: return "WAIT", "日线破位"
-            if minute_df is not None and not minute_df.empty:
-                if minute_df.iloc[-1]['close'] > minute_df.iloc[-1]['MA_PRICE']: return "BUY", "分时强势"
-            return "WAIT", "等待分时确认"
-
         请严格返回 JSON (纯文本):
         {
             "strategy_name": "策略名",
@@ -286,7 +288,7 @@ if 'calc_s1' not in st.session_state:
 
 with st.sidebar:
     st.title("控制台")
-    with st.expander("➕ 添加/编辑 个股 (手动)", expanded=True):
+    with st.expander("➕ 添加/编辑 个股", expanded=True):
         code_in = st.text_input("代码", key="cin").strip()
         if st.button("⚡ 智能计算 R/S"):
             if code_in:
@@ -322,9 +324,12 @@ with st.sidebar:
                 if code_in:
                     df = load_data(); name = ""
                     try:
-                        info = ak.stock_zh_a_spot_em()
-                        name = info[info['代码']==code_in]['名称'].values[0]
+                        # 尝试获取名字，如果akshare卡住，就用 sinajs
+                        q = get_realtime_quotes_fast([code_in])
+                        if code_in in q: name = q[code_in]['name']
+                        else: name = code_in
                     except: name = code_in
+                    
                     final_grp = grp_val if grp_val else "默认"
                     new_entry = {"code": code_in, "name": name, "s1": s1, "s2": s2, "r1": r1, "r2": r2, "group": final_grp, "strategy": strat, "note": ""}
                     if code_in in df.code.values:
@@ -339,12 +344,11 @@ tab1, tab2, tab3 = st.tabs(["🔭 实战看板", "🎓 AI 深度训练", "🧠 �
 with tab1:
     df = load_data()
     df_logics = get_learned_logics()
+    
     if not df.empty:
-        try:
-            spot = ak.stock_zh_a_spot_em(); spot = spot[['代码','名称','最新价','涨跌幅']]
-            spot.columns = ['code','name','price','pct']
-        except: spot = pd.DataFrame()
-
+        # 🔥 使用急速接口获取当前价格，避免卡死
+        quotes = get_realtime_quotes_fast(df['code'].tolist())
+        
         all_groups = df['group'].unique()
         for group in all_groups:
             st.subheader(f"📂 {group}")
@@ -354,11 +358,8 @@ with tab1:
                 cols = st.columns(4)
                 for j, row in enumerate(rows[i:i+4]):
                     code = row['code']; strat = row['strategy']
-                    price = 0; pct = 0; name = row['name']
-                    if not spot.empty:
-                        s_row = spot[spot['code']==code]
-                        if not s_row.empty:
-                            price = s_row.iloc[0]['price']; pct = s_row.iloc[0]['pct']; name = s_row.iloc[0]['name']
+                    info = quotes.get(code, {'name': row['name'], 'price': 0, 'pct': 0, 'pre_close': 0})
+                    name = info['name']; price = info['price']; pct = info['pct']
                     
                     with cols[j]:
                         with st.container(border=True):
@@ -366,18 +367,18 @@ with tab1:
                             with c1: st.markdown(f"**{name}** `{code}`")
                             with c2: 
                                 if st.button("🗑️", key=f"d_{code}"): delete_single_stock(code); st.rerun()
+                            
                             p_col = "price-up" if pct > 0 else "price-down"
                             st.markdown(f"<div class='big-price {p_col}'>{price} <small>{pct:+.2f}%</small></div>", unsafe_allow_html=True)
-
-                            # 🔥 核心修正：双引擎分流
-                            bundle = get_stock_data_bundle(code)
                             
-                            # A. 如果是内置策略 (龙头/连板...)
+                            # 获取数据包 (如果是 AI 策略或内置策略需要计算)
+                            bundle = get_stock_data_bundle(code)
+                            if bundle: bundle['info'].update(info) # 更新最新价格
+
                             if strat in BUILTIN_STRATEGIES:
                                 builtin_text, badge_class = evaluate_builtin_strategy(strat, bundle)
                                 st.markdown(f"<span class='strategy-badge {badge_class}'>{strat[:5]}</span> {builtin_text}", unsafe_allow_html=True)
                             
-                            # B. 如果是 AI 学习的策略
                             elif not df_logics.empty and strat in df_logics['strategy_name'].values:
                                 st.markdown(f"<span class='strategy-badge bg-ai'>AI战法</span> {strat}", unsafe_allow_html=True)
                                 if bundle:
@@ -396,6 +397,8 @@ with tab1:
                             """, unsafe_allow_html=True)
                             
                             if st.button("📈 看图", key=f"b_{code}"): view_chart_modal(code, name)
+    else:
+        st.info("👈 暂无股票，请在左侧添加！")
 
 with tab2:
     st.header("🎓 训练 AI：多周期共振")
