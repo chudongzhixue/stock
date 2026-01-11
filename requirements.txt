@@ -6,3 +6,4 @@ numpy
 yfinance
 st-gsheets-connection
 google-generativeai
+yt-dlp
