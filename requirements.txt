@@ -5,3 +5,4 @@ akshare
 numpy
 yfinance
 st-gsheets-connection
+google-generativeai
