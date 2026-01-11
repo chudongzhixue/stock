@@ -14,38 +14,34 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 页面基础设置 ---
 st.set_page_config(
-    page_title="Alpha 游资系统 (AI完全体)",
+    page_title="Alpha 游资系统 (Pro + AI)",
     page_icon="🐲",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# --- 1. 连接数据库 (Google Sheets) ---
+# --- 连接服务 ---
 try:
     from streamlit_gsheets import GSheetsConnection
     if "connections" in st.secrets and "gsheets" in st.secrets["connections"]:
         USE_CLOUD_DB = True
         conn = st.connection("gsheets", type=GSheetsConnection)
-    else:
-        USE_CLOUD_DB = False
-except:
-    USE_CLOUD_DB = False
+    else: USE_CLOUD_DB = False
+except: USE_CLOUD_DB = False
 
-# --- 2. 连接 AI 大脑 (Gemini) ---
 try:
     if "gemini" in st.secrets and "api_key" in st.secrets["gemini"]:
         genai.configure(api_key=st.secrets["gemini"]["api_key"])
         USE_AI = True
-    else:
-        USE_AI = False
-except:
-    USE_AI = False
+    else: USE_AI = False
+except: USE_AI = False
 
-# --- 🎨 CSS 样式 ---
+# --- 🎨 CSS 样式 (恢复四宫格样式) ---
 st.markdown("""
     <style>
         html, body, p, div, span { font-family: 'Source Sans Pro', sans-serif; }
         .block-container { padding-top: 1rem !important; }
+        
         div[data-testid="stVerticalBlockBorderWrapper"] {
             border: 1px solid #e6e6e6 !important;
             box-shadow: 0 4px 12px rgba(0,0,0,0.08); 
@@ -58,17 +54,25 @@ st.markdown("""
         .price-up { color: #d9534f; }
         .price-down { color: #5cb85c; }
         .price-gray { color: #888; }
+        
         .strategy-badge { padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; color: white; background-color: #333; margin-right: 4px; }
         .bg-dragon { background: linear-gradient(45deg, #d32f2f, #ef5350); }
         .bg-relay { background: linear-gradient(45deg, #f57c00, #ffb74d); }
         .bg-low { background: linear-gradient(45deg, #1976d2, #42a5f5); }
         .bg-trend { background: linear-gradient(45deg, #388e3c, #66bb6a); }
+        
         .advice-box { margin-top: 5px; padding: 8px; border-radius: 4px; font-weight: bold; text-align: center; font-size: 0.9rem; border: 1px solid #eee; }
         .advice-buy { background-color: #fff3f3; color: #d9534f; border-color: #d9534f; }
         .advice-sell { background-color: #f0f9f0; color: #5cb85c; border-color: #5cb85c; }
         .advice-hold { background-color: #f0f8ff; color: #3498db; border-color: #3498db; }
+        
+        /* 🔥 恢复支撑压力位四宫格样式 */
+        .sr-block { padding-top: 6px; border-top: 1px dashed #eee; display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+        .sr-item { font-size: 0.8rem; font-weight: bold; color: #555; }
+        
         .plan-item { margin-bottom: 4px; line-height: 1.4; font-size: 0.85rem; color: #444; }
         .highlight-money { color: #d9534f; font-weight: bold; background: #fff5f5; padding: 0 4px; border-radius: 3px; }
+        .highlight-support { color: #2980b9; font-weight: bold; background: #eaf2f8; padding: 0 4px; border-radius: 3px; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -83,6 +87,10 @@ def load_data():
         try:
             df = conn.read(worksheet="stock_config", ttl=10)
             df['code'] = df['code'].astype(str).str.replace(r'\.0$', '', regex=True).str.zfill(6)
+            for col in ['name', 'group', 'strategy', 'note']:
+                if col in df.columns: df[col] = df[col].fillna("")
+            for col in ['s1', 's2', 'r1', 'r2']:
+                if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
             for col in default_cols:
                 if col not in df.columns: df[col] = 0.0 if col not in ['name','group','strategy','note'] else ""
             return df[default_cols]
@@ -206,51 +214,48 @@ def prefetch_all_data(stock_codes):
             except: results[code] = (None, 0, 0, 0, 0)
     return results
 
-# --- 新增：视频下载与 AI 分析模块 ---
+def get_dist_html(target, current):
+    try: target=float(target); current=float(current)
+    except: return ""
+    if target == 0: return ""
+    d = ((current - target) / target) * 100
+    col = "#d9534f" if abs(d)<1.0 else "#f0ad4e" if abs(d)<3.0 else "#999"
+    return f"<span style='color:{col}; font-weight:bold;'>({d:+.1f}%)</span>"
+
+# --- 视频分析模块 ---
 def process_video_url_or_file(input_type, file_obj, url, user_prompt):
-    """自动下载或处理上传的视频"""
     if not USE_AI: return None
-    
     status = st.empty()
     temp_path = "temp_ai_video.mp4"
     
-    # 1. 来源处理
     if input_type == "Link (链接)":
         if not url:
             status.error("❌ 请输入链接")
             return None
-        status.info(f"🕸️ 正在从网络抓取视频... (可能需要几十秒，取决于网速)")
+        status.info(f"🕸️ 正在抓取视频... (请稍候)")
         try:
             ydl_opts = {'format': 'best[ext=mp4]/best', 'outtmpl': temp_path, 'quiet': True, 'overwrites': True}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
         except Exception as e:
-            status.error(f"❌ 视频下载失败: {e}")
-            return None
+            status.error(f"❌ 下载失败: {e}"); return None
     else:
         if not file_obj:
-            status.error("❌ 请上传文件")
-            return None
-        with open(temp_path, "wb") as f:
-            f.write(file_obj.getbuffer())
+            status.error("❌ 请上传文件"); return None
+        with open(temp_path, "wb") as f: f.write(file_obj.getbuffer())
 
-    # 2. 上传给 Gemini
     try:
-        status.info("📤 视频已准备好，正在传输给 AI 大脑...")
+        status.info("📤 正在上传给 AI 大脑...")
         video_upload = genai.upload_file(path=temp_path)
         while video_upload.state.name == "PROCESSING":
-            time.sleep(2)
-            video_upload = genai.get_file(video_upload.name)
-        
+            time.sleep(2); video_upload = genai.get_file(video_upload.name)
         if video_upload.state.name == "FAILED":
-            status.error("❌ AI 处理视频失败 (文件可能损坏)")
-            return None
+            status.error("❌ AI 处理失败"); return None
             
-        status.info("🧠 AI 正在深度复盘... (Gemini 1.5 Pro)")
-        
+        status.info("🧠 AI 正在深度分析...")
         system_prompt = """
-        你是一位顶级游资操盘手。请仔细观看这段复盘视频。
-        总结出一套可执行的策略，严格返回如下 JSON 格式 (不要 Markdown, 纯文本):
+        你是一位顶级游资操盘手。请分析这段视频。
+        总结出一套可执行的策略，严格返回如下 JSON 格式 (纯文本):
         {
             "strategy_name": "策略名",
             "core_logic": "核心逻辑",
@@ -261,16 +266,12 @@ def process_video_url_or_file(input_type, file_obj, url, user_prompt):
         """
         model = genai.GenerativeModel(model_name="gemini-1.5-flash")
         response = model.generate_content([video_upload, system_prompt, user_prompt])
-        
-        # 清理
         genai.delete_file(video_upload.name)
         if os.path.exists(temp_path): os.remove(temp_path)
-        
         status.empty()
         return response.text
     except Exception as e:
-        status.error(f"AI 调用出错: {e}")
-        return None
+        status.error(f"AI 出错: {e}"); return None
 
 @st.dialog("📈 个股详情", width="large")
 def view_chart_modal(code, name):
@@ -295,6 +296,8 @@ with st.sidebar:
     ai_icon = "🧠" if USE_AI else "🚫"
     st.markdown(f"数据: {status_icon} | AI: {ai_icon}")
     st.divider()
+    
+    # 🔥 恢复：添加/编辑股票时可选择分组
     with st.expander("➕ 添加/编辑 个股"):
         code_in = st.text_input("代码", key="cin").strip()
         if st.button("⚡ 计算"):
@@ -313,12 +316,28 @@ with st.sidebar:
             s2 = c1.number_input("S2", value=float(st.session_state.calc_s2))
             r1 = c2.number_input("R1", value=float(st.session_state.calc_r1))
             r2 = c2.number_input("R2", value=float(st.session_state.calc_r2))
+            
+            # 🔥 恢复：分组选择功能
+            df_temp = load_data()
+            existing_groups = list(df_temp['group'].unique())
+            if "默认" not in existing_groups: existing_groups.insert(0, "默认")
+            
+            group_sel = st.selectbox("分组", existing_groups + ["➕ 新建分组..."])
+            if group_sel == "➕ 新建分组...":
+                group_val = st.text_input("输入新分组名")
+            else:
+                group_val = group_sel
+            
             strat = st.selectbox("战法", STRATEGY_OPTIONS)
+            
             if st.form_submit_button("💾 保存"):
                 if code_in:
                     df = load_data(); name = ""
                     if code_in in df.code.values: name = df.loc[df.code==code_in, 'name'].values[0]
-                    new_entry = {"code": code_in, "name": name, "s1": s1, "s2": s2, "r1": r1, "r2": r2, "group": "默认", "strategy": strat, "note": ""}
+                    # 如果没有输入新组名，回退到默认
+                    final_group = group_val if group_val else "默认"
+                    
+                    new_entry = {"code": code_in, "name": name, "s1": s1, "s2": s2, "r1": r1, "r2": r2, "group": final_group, "strategy": strat, "note": ""}
                     if code_in in df.code.values:
                         for k, v in new_entry.items(): df.loc[df.code==code_in, k] = v
                     else: df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
@@ -333,29 +352,48 @@ with tab1:
     if not df.empty:
         quotes = get_realtime_quotes(df['code'].tolist())
         batch_data = prefetch_all_data(df['code'].unique().tolist())
-        rows = [r for _, r in df.iterrows()]
-        for i in range(0, len(rows), 4):
-            cols = st.columns(4)
-            for j, row in enumerate(rows[i:i+4]):
-                code = row['code']; strat = row['strategy']
-                info = quotes.get(code, {}); p = info.get('price', 0); name = info.get('name', code)
-                hist, cost, zt, max_amt, tn = batch_data.get(code, (None, 0, 0, 0, 0))
-                adv, sty, bdg = evaluate_strategy_realtime(strat, info, hist, cost, zt, tn)
-                
-                with cols[j]:
-                    with st.container(border=True):
-                        c1, c2 = st.columns([4, 1])
-                        with c1: st.markdown(f"**{name}** `{code}`")
-                        with c2: 
-                            if st.button("🗑️", key=f"d_{code}"): delete_single_stock(code); st.rerun()
-                        p_col = "price-up" if p > info.get('pre_close',0) else "price-down"
-                        st.markdown(f"<div class='big-price {p_col}'>{p:.2f}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<span class='strategy-badge {bdg}'>{strat[:2]}</span> {adv}", unsafe_allow_html=True)
-                        st.markdown(f"""<div style='font-size:0.8rem;color:#666;margin:5px 0'>
-                        R2: {row['r2']} | S1: {row['s1']}</div>""", unsafe_allow_html=True)
-                        with st.expander("🎲 计划"):
-                            st.markdown(generate_plan_details(strat, code, p, max_amt, tn, 0, 0), unsafe_allow_html=True)
-                        if st.button("📈 看图", key=f"b_{code}"): view_chart_modal(code, name)
+        
+        # 🔥 恢复：按分组循环显示 (龙头掘金、涨停回调...)
+        all_groups = df['group'].unique()
+        for group in all_groups:
+            st.subheader(f"📂 {group}")
+            group_df = df[df['group'] == group]
+            
+            rows = [r for _, r in group_df.iterrows()]
+            for i in range(0, len(rows), 4):
+                cols = st.columns(4)
+                for j, row in enumerate(rows[i:i+4]):
+                    code = row['code']; strat = row['strategy']
+                    info = quotes.get(code, {}); p = info.get('price', 0); name = info.get('name', code)
+                    hist, cost, zt, max_amt, tn = batch_data.get(code, (None, 0, 0, 0, 0))
+                    adv, sty, bdg = evaluate_strategy_realtime(strat, info, hist, cost, zt, tn)
+                    
+                    with cols[j]:
+                        with st.container(border=True):
+                            c1, c2 = st.columns([4, 1])
+                            with c1: st.markdown(f"**{name}** `{code}`")
+                            with c2: 
+                                if st.button("🗑️", key=f"d_{code}"): delete_single_stock(code); st.rerun()
+                            p_col = "price-up" if p > info.get('pre_close',0) else "price-down"
+                            st.markdown(f"<div class='big-price {p_col}'>{p:.2f}</div>", unsafe_allow_html=True)
+                            st.markdown(f"<span class='strategy-badge {bdg}'>{strat[:2]}</span> {adv}", unsafe_allow_html=True)
+                            
+                            # 🔥 恢复：四宫格支撑压力位显示
+                            r1, r2, s1, s2 = row['r1'], row['r2'], row['s1'], row['s2']
+                            st.markdown(f"""
+                            <div class='sr-block'>
+                                <div class='sr-item'><span style='color:#d9534f'>R2</span> {r2}{get_dist_html(r2, p)}</div>
+                                <div class='sr-item'><span style='color:#5cb85c'>S1</span> {s1}{get_dist_html(s1, p)}</div>
+                                <div class='sr-item'><span style='color:#f0ad4e'>R1</span> {r1}{get_dist_html(r1, p)}</div>
+                                <div class='sr-item'><span style='color:#4cae4c'>S2</span> {s2}{get_dist_html(s2, p)}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            with st.expander("🎲 计划"):
+                                st.markdown(generate_plan_details(strat, code, p, max_amt, tn, 0, 0), unsafe_allow_html=True)
+                            if st.button("📈 看图", key=f"b_{code}"): view_chart_modal(code, name)
+    else:
+        st.info("👈 请在左侧添加股票")
 
 with tab2:
     st.header("🎓 AI 视频操盘学徒")
@@ -363,15 +401,9 @@ with tab2:
     else:
         st.markdown("支持 B站 / YouTube 链接，或直接上传文件。")
         input_method = st.radio("选择来源", ["Link (链接)", "File (上传文件)"], horizontal=True)
-        
-        url_input = ""
-        file_input = None
-        
-        if input_method == "Link (链接)":
-            url_input = st.text_input("🔗 粘贴视频链接 (B站/YouTube)")
-        else:
-            file_input = st.file_uploader("📂 上传视频", type=['mp4', 'mov'])
-            
+        url_input = ""; file_input = None
+        if input_method == "Link (链接)": url_input = st.text_input("🔗 粘贴视频链接 (B站/YouTube)")
+        else: file_input = st.file_uploader("📂 上传视频", type=['mp4', 'mov'])
         note_input = st.text_input("💡 提示词 (可选)", value="重点分析主力买点逻辑")
         
         if st.button("🚀 开始 AI 分析"):
