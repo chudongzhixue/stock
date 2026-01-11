@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 页面基础设置 ---
 st.set_page_config(
-    page_title="Alpha 游资系统 (完全体)",
+    page_title="Alpha 游资系统 (稳定版)",
     page_icon="🐲",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -223,34 +223,44 @@ def execute_ai_logic(bundle, logic_code):
         return "逻辑未触发", "sig-wait"
     except Exception as e: return f"运行错误: {str(e)[:20]}", "sig-wait"
 
-# --- AI 学习模块 (修复核心逻辑) ---
+# --- AI 学习模块 (修复 B站下载 & 逻辑报错) ---
 def process_video_comprehensive(file_obj, url, input_type, note):
     if not USE_AI: return None
     status = st.empty()
     temp_path = "temp.mp4"
     
-    # 🔥 修复1: 模糊匹配 "Link" (因为前端传过来的是 "Link" 不是 "Link (链接)")
-    if "Link" in input_type: 
+    # 🔥 修复1: 兼容 'Link' 和 'Link (链接)' 两种写法
+    if "Link" in input_type:
         if not url:
             status.error("❌ 请输入视频链接！")
             return None
         try:
-            status.info("🕸️ 正在抓取视频 (可能需要一些时间)...")
-            # 🔥 修复2: 放宽格式限制，避免 B站 报错 "Requested format not available"
-            ydl_opts = {'format': 'best', 'outtmpl': temp_path, 'quiet': True, 'overwrites': True}
+            status.info("🕸️ 正在抓取视频 (云端环境下载较慢，请耐心等待)...")
+            # 🔥 修复2: 针对 B站 的特殊配置
+            # format='best' 表示下载最佳的【单文件】，不强求 mp4，避免需要合并音视频
+            # 这样即使云端没有 FFmpeg 也能成功下载
+            ydl_opts = {
+                'format': 'best', 
+                'outtmpl': temp_path, 
+                'quiet': True, 
+                'overwrites': True,
+                # 增加 header 伪装，防止 B站 403
+                'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+            }
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
         except Exception as e: 
-            status.error(f"下载失败: {str(e)[:100]}... (请检查链接或稍后重试)")
+            status.error(f"❌ 下载失败: {str(e)[:100]}")
+            st.info("💡 提示: B站/YouTube 部分高清视频需要 FFmpeg 合并，云端暂不支持。请尝试换个视频，或直接上传本地文件。")
             return None
     else:
-        # 🔥 修复3: 文件模式必须检查非空
+        # 🔥 修复3: 严格检查文件是否存在
         if file_obj is None:
-            status.error("❌ 请先点击 'Browse files' 上传视频！")
+            status.error("❌ 请先点击 'Browse files' 上传视频文件！")
             return None
         with open(temp_path, "wb") as f: f.write(file_obj.getbuffer())
 
     try:
-        status.info("🧠 AI 正在进行多周期建模...")
+        status.info("🧠 AI 正在分析主力意图 (Gemini 1.5 Pro)...")
         video_upload = genai.upload_file(path=temp_path)
         while video_upload.state.name == "PROCESSING": time.sleep(2); video_upload = genai.get_file(video_upload.name)
         
@@ -354,7 +364,6 @@ with tab1:
     
     if not df.empty:
         quotes = get_realtime_quotes_fast(df['code'].tolist())
-        
         all_groups = df['group'].unique()
         for group in all_groups:
             st.subheader(f"📂 {group}")
@@ -407,6 +416,7 @@ with tab1:
 
 with tab2:
     st.header("🎓 训练 AI：多周期共振")
+    # 🔥 修复4: 使用完整的字符串来判断，避免混淆
     input_method = st.radio("来源", ["Link (链接)", "File (文件)"], horizontal=True)
     url_input = ""; file_input = None
     if input_method == "Link (链接)": url_input = st.text_input("🔗 视频链接")
@@ -414,8 +424,8 @@ with tab2:
     note = st.text_input("提示词", value="重点分析：日线趋势和分时买点的配合")
     
     if st.button("🚀 开始深度学习"):
-        # 🔥🔥🔥 修正：这里传入的是 "Link" 而不是 "Link (链接)"，与函数内逻辑匹配
-        res = process_video_comprehensive(file_input, url_input, input_method.split(" ")[0], note)
+        # 🔥🔥🔥 修正：传入整个 input_method 字符串，让函数内部判断
+        res = process_video_comprehensive(file_input, url_input, input_method, note)
         if res:
             try:
                 data = json.loads(res.replace("```json","").replace("```","").replace("python","").strip())
