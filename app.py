@@ -223,26 +223,29 @@ def execute_ai_logic(bundle, logic_code):
         return "逻辑未触发", "sig-wait"
     except Exception as e: return f"运行错误: {str(e)[:20]}", "sig-wait"
 
-# --- AI 学习模块 (🔥 修复核心) ---
+# --- AI 学习模块 (修复核心逻辑) ---
 def process_video_comprehensive(file_obj, url, input_type, note):
     if not USE_AI: return None
     status = st.empty()
     temp_path = "temp.mp4"
     
-    # 🔥🔥🔥 修复点：更宽松的字符串判断
+    # 🔥 修复1: 模糊匹配 "Link" (因为前端传过来的是 "Link" 不是 "Link (链接)")
     if "Link" in input_type: 
         if not url:
             status.error("❌ 请输入视频链接！")
             return None
         try:
-            status.info("🕸️ 正在抓取视频...")
-            ydl_opts = {'format': 'best[ext=mp4]/best', 'outtmpl': temp_path, 'quiet': True, 'overwrites': True}
+            status.info("🕸️ 正在抓取视频 (可能需要一些时间)...")
+            # 🔥 修复2: 放宽格式限制，避免 B站 报错 "Requested format not available"
+            ydl_opts = {'format': 'best', 'outtmpl': temp_path, 'quiet': True, 'overwrites': True}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-        except Exception as e: status.error(f"下载失败: {e}"); return None
+        except Exception as e: 
+            status.error(f"下载失败: {str(e)[:100]}... (请检查链接或稍后重试)")
+            return None
     else:
-        # 🔥🔥🔥 修复点：文件模式防呆检查
+        # 🔥 修复3: 文件模式必须检查非空
         if file_obj is None:
-            status.error("❌ 请先点击 'Browse files' 上传视频文件！")
+            status.error("❌ 请先点击 'Browse files' 上传视频！")
             return None
         with open(temp_path, "wb") as f: f.write(file_obj.getbuffer())
 
@@ -411,6 +414,7 @@ with tab2:
     note = st.text_input("提示词", value="重点分析：日线趋势和分时买点的配合")
     
     if st.button("🚀 开始深度学习"):
+        # 🔥🔥🔥 修正：这里传入的是 "Link" 而不是 "Link (链接)"，与函数内逻辑匹配
         res = process_video_comprehensive(file_input, url_input, input_method.split(" ")[0], note)
         if res:
             try:
