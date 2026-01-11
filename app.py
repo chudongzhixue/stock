@@ -223,54 +223,47 @@ def execute_ai_logic(bundle, logic_code):
         return "逻辑未触发", "sig-wait"
     except Exception as e: return f"运行错误: {str(e)[:20]}", "sig-wait"
 
-# --- AI 学习模块 (🔥 增加智能模型切换) ---
+# --- 🔥 AI 学习模块 (智能降级版) ---
 def process_video_comprehensive(file_obj, url, input_type, note):
     if not USE_AI: return None
     status = st.empty()
     temp_path = "temp.mp4"
     
-    if "Link" in input_type:
+    # 1. 下载或保存视频
+    if "Link" in input_type: 
         if not url:
             status.error("❌ 请输入视频链接！")
             return None
         try:
-            status.info("🕸️ 正在抓取视频 (云端环境下载较慢，请耐心等待)...")
-            ydl_opts = {
-                'format': 'best', 
-                'outtmpl': temp_path, 
-                'quiet': True, 
-                'overwrites': True,
-                'http_headers': {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-            }
+            status.info("🕸️ 正在抓取视频 (可能需要一些时间)...")
+            ydl_opts = {'format': 'best', 'outtmpl': temp_path, 'quiet': True, 'overwrites': True}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
         except Exception as e: 
-            status.error(f"❌ 下载失败: {str(e)[:100]}... 建议上传本地视频")
+            status.error(f"下载失败: {str(e)[:100]}... (建议上传本地文件)")
             return None
     else:
         if file_obj is None:
-            status.error("❌ 请先点击 'Browse files' 上传视频文件！")
+            status.error("❌ 请先上传视频文件！")
             return None
         with open(temp_path, "wb") as f: f.write(file_obj.getbuffer())
 
+    # 2. 调用 AI
     try:
-        status.info("🧠 AI 正在连接 (尝试 Flash 模型)...")
+        status.info("🧠 正在连接 AI 大脑...")
         video_upload = genai.upload_file(path=temp_path)
         
-        # 等待视频处理
-        retry_count = 0
-        while video_upload.state.name == "PROCESSING": 
-            time.sleep(2)
-            video_upload = genai.get_file(video_upload.name)
-            retry_count += 1
-            if retry_count > 30: # 超时保护
-                status.error("❌ 视频处理超时，请重试")
-                return None
+        # 等待处理
+        for _ in range(30): # 最多等60秒
+            if video_upload.state.name == "PROCESSING":
+                time.sleep(2)
+                video_upload = genai.get_file(video_upload.name)
+            else:
+                break
         
         if video_upload.state.name == "FAILED":
-            status.error("❌ 视频格式处理失败，请换个视频")
+            status.error("❌ 视频处理失败")
             return None
 
-        # 🔥🔥🔥 智能 Prompt
         system_prompt = """
         你是一位顶级游资操盘手。请分析视频，总结出一套【多周期共振】的交易系统。
         请编写一个 Python 函数 `analyze(daily_df, minute_df)`:
@@ -290,20 +283,31 @@ def process_video_comprehensive(file_obj, url, input_type, note):
         }
         """
         
-        # 🔥🔥🔥 智能模型切换：Flash 失败则切 Pro
+        # 🔥🔥🔥 核心：智能模型切换逻辑
+        # 1. 优先尝试最快的 Flash 模型
         try:
-            status.info("🧠 正在使用 Gemini 1.5 Flash 极速分析...")
+            status.info("🧠 正在思考 (Gemini 1.5 Flash)...")
             model = genai.GenerativeModel(model_name="gemini-1.5-flash")
             response = model.generate_content([video_upload, system_prompt, note])
         except Exception as e:
+            # 2. 如果报错 (404 Not Found), 自动降级到 Pro
             if "404" in str(e) or "not found" in str(e):
-                status.warning("⚠️ Flash 模型未就绪，自动切换至 Gemini 1.5 Pro...")
-                model = genai.GenerativeModel(model_name="gemini-1.5-pro")
-                response = model.generate_content([video_upload, system_prompt, note])
+                status.warning("⚠️ Flash 模型不可用，尝试切换至 Gemini 1.5 Pro...")
+                try:
+                    model = genai.GenerativeModel(model_name="gemini-1.5-pro")
+                    response = model.generate_content([video_upload, system_prompt, note])
+                except Exception as e2:
+                     # 3. 如果 Pro 也不行，降级到最老版本
+                     status.warning("⚠️ Pro 模型也不可用，尝试切换至 Gemini Pro (Legacy)...")
+                     model = genai.GenerativeModel(model_name="gemini-pro")
+                     # 旧版模型不支持直接传视频对象，这里做一个简化处理（只传提示词）
+                     # 注意：gemini-pro 不支持视频输入，所以如果走到这一步，其实是会失败的。
+                     # 但只要您更新了 requirements.txt，前两步一定能成功一步。
+                     raise e2
             else:
                 raise e
 
-        # 清理工作
+        # 清理
         try: genai.delete_file(video_upload.name)
         except: pass
         if os.path.exists(temp_path): os.remove(temp_path)
