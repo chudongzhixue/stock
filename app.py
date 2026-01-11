@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 页面基础设置 ---
 st.set_page_config(
-    page_title="Alpha 游资系统 (修复版)",
+    page_title="Alpha 游资系统 (完全体)",
     page_icon="🐲",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -117,7 +117,7 @@ def save_learned_logic(record):
         except: pass
     df.to_csv(LEARNED_LOGIC_FILE, index=False)
 
-# --- 辅助函数 (时间/格式) ---
+# --- 辅助函数 ---
 def is_trading_time():
     now = datetime.utcnow() + timedelta(hours=8)
     if now.weekday() >= 5: return False, "周末休市"
@@ -133,9 +133,7 @@ def get_dist_html(target, current):
     col = "#d9534f" if abs(d)<1.0 else "#f0ad4e" if abs(d)<3.0 else "#999"
     return f"<span style='color:{col}; font-weight:bold;'>({d:+.1f}%)</span>"
 
-# --- 🔥 修复：急速行情接口 (Sinajs) ---
 def get_realtime_quotes_fast(code_list):
-    """使用新浪接口批量获取行情，速度极快，不卡顿"""
     if not code_list: return {}
     q_codes = [f"{'sh' if c.startswith(('6', '5')) else 'sz'}{c}" for c in code_list]
     url = f"http://hq.sinajs.cn/list={','.join(q_codes)}"
@@ -156,7 +154,6 @@ def get_realtime_quotes_fast(code_list):
         return data
     except: return {}
 
-# --- 全维度数据获取 (用于AI) ---
 @st.cache_data(ttl=60)
 def get_stock_data_bundle(code):
     bundle = {"daily": None, "minute": None, "info": {}}
@@ -226,18 +223,27 @@ def execute_ai_logic(bundle, logic_code):
         return "逻辑未触发", "sig-wait"
     except Exception as e: return f"运行错误: {str(e)[:20]}", "sig-wait"
 
-# --- AI 学习模块 ---
+# --- AI 学习模块 (🔥 修复核心) ---
 def process_video_comprehensive(file_obj, url, input_type, note):
     if not USE_AI: return None
     status = st.empty()
     temp_path = "temp.mp4"
-    if input_type == "Link (链接)":
+    
+    # 🔥🔥🔥 修复点：更宽松的字符串判断
+    if "Link" in input_type: 
+        if not url:
+            status.error("❌ 请输入视频链接！")
+            return None
         try:
             status.info("🕸️ 正在抓取视频...")
             ydl_opts = {'format': 'best[ext=mp4]/best', 'outtmpl': temp_path, 'quiet': True, 'overwrites': True}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
         except Exception as e: status.error(f"下载失败: {e}"); return None
     else:
+        # 🔥🔥🔥 修复点：文件模式防呆检查
+        if file_obj is None:
+            status.error("❌ 请先点击 'Browse files' 上传视频文件！")
+            return None
         with open(temp_path, "wb") as f: f.write(file_obj.getbuffer())
 
     try:
@@ -288,7 +294,7 @@ if 'calc_s1' not in st.session_state:
 
 with st.sidebar:
     st.title("控制台")
-    with st.expander("➕ 添加/编辑 个股", expanded=True):
+    with st.expander("➕ 添加/编辑 个股 (手动)", expanded=True):
         code_in = st.text_input("代码", key="cin").strip()
         if st.button("⚡ 智能计算 R/S"):
             if code_in:
@@ -324,12 +330,10 @@ with st.sidebar:
                 if code_in:
                     df = load_data(); name = ""
                     try:
-                        # 尝试获取名字，如果akshare卡住，就用 sinajs
                         q = get_realtime_quotes_fast([code_in])
                         if code_in in q: name = q[code_in]['name']
                         else: name = code_in
                     except: name = code_in
-                    
                     final_grp = grp_val if grp_val else "默认"
                     new_entry = {"code": code_in, "name": name, "s1": s1, "s2": s2, "r1": r1, "r2": r2, "group": final_grp, "strategy": strat, "note": ""}
                     if code_in in df.code.values:
@@ -346,7 +350,6 @@ with tab1:
     df_logics = get_learned_logics()
     
     if not df.empty:
-        # 🔥 使用急速接口获取当前价格，避免卡死
         quotes = get_realtime_quotes_fast(df['code'].tolist())
         
         all_groups = df['group'].unique()
@@ -371,9 +374,8 @@ with tab1:
                             p_col = "price-up" if pct > 0 else "price-down"
                             st.markdown(f"<div class='big-price {p_col}'>{price} <small>{pct:+.2f}%</small></div>", unsafe_allow_html=True)
                             
-                            # 获取数据包 (如果是 AI 策略或内置策略需要计算)
                             bundle = get_stock_data_bundle(code)
-                            if bundle: bundle['info'].update(info) # 更新最新价格
+                            if bundle: bundle['info'].update(info)
 
                             if strat in BUILTIN_STRATEGIES:
                                 builtin_text, badge_class = evaluate_builtin_strategy(strat, bundle)
