@@ -13,7 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 页面基础设置 ---
 st.set_page_config(
-    page_title="Alpha 游资系统 (最终稳定版)",
+    page_title="Alpha 游资系统 (Pro)",
     page_icon="🐲",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -61,12 +61,17 @@ st.markdown("""
         .bg-relay { background: linear-gradient(45deg, #f57c00, #ffb74d); }
         .bg-low { background: linear-gradient(45deg, #1976d2, #42a5f5); }
         .bg-ai { background: linear-gradient(45deg, #6a11cb, #2575fc); }
+        
+        /* Tab 样式微调 */
+        button[data-baseweb="tab"] { font-weight: bold; font-size: 1rem; }
     </style>
 """, unsafe_allow_html=True)
 
 DATA_FILE = 'my_stock_plan_v3.csv'
 LEARNED_LOGIC_FILE = 'comprehensive_logic_v2.csv'
 BUILTIN_STRATEGIES = ["自动观察", "🐲 龙头掘金", "🚀 连板接力", "📉 涨停回调", "🌊 趋势低吸"]
+# 🔥 定义您的四大核心板块
+DEFAULT_GROUPS = ["龙头掘金", "持仓关注", "博主推荐", "市场热点", "默认"]
 
 # --- 数据管理 ---
 def load_data():
@@ -168,15 +173,11 @@ def get_stock_data_bundle(code):
             daily['MA20'] = daily['收盘'].rolling(20).mean()
             daily['VOL_MA5'] = daily['成交量'].rolling(5).mean()
             bundle['daily'] = daily
-            
             last = daily.iloc[-1]
             bundle['info'] = {
-                "name": code,
-                "price": last['收盘'],
-                "pct": last['涨跌幅'],
+                "name": code, "price": last['收盘'], "pct": last['涨跌幅'],
                 "pre_close": last['收盘'] / (1 + last['涨跌幅']/100)
             }
-
         minute = ak.stock_zh_a_hist_min_em(symbol=code, period='1', adjust='qfq')
         if not minute.empty:
             minute['MA_PRICE'] = (minute['close'] * minute['volume']).cumsum() / minute['volume'].cumsum()
@@ -184,7 +185,7 @@ def get_stock_data_bundle(code):
         return bundle
     except: return None
 
-# --- 核心策略引擎 ---
+# --- 策略引擎 ---
 def evaluate_builtin_strategy(strategy, bundle):
     if not bundle or bundle['daily'] is None: return "数据不足", "bg-auto"
     daily = bundle['daily']; info = bundle['info']
@@ -223,46 +224,27 @@ def execute_ai_logic(bundle, logic_code):
         return "逻辑未触发", "sig-wait"
     except Exception as e: return f"运行错误: {str(e)[:20]}", "sig-wait"
 
-# --- 🔥 AI 学习模块 (智能降级版) ---
+# --- AI ---
 def process_video_comprehensive(file_obj, url, input_type, note):
     if not USE_AI: return None
     status = st.empty()
     temp_path = "temp.mp4"
-    
-    # 1. 下载或保存视频
     if "Link" in input_type: 
-        if not url:
-            status.error("❌ 请输入视频链接！")
-            return None
+        if not url: status.error("❌ 请输入视频链接！"); return None
         try:
-            status.info("🕸️ 正在抓取视频 (可能需要一些时间)...")
+            status.info("🕸️ 正在抓取视频...")
             ydl_opts = {'format': 'best', 'outtmpl': temp_path, 'quiet': True, 'overwrites': True}
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-        except Exception as e: 
-            status.error(f"下载失败: {str(e)[:100]}... (建议上传本地文件)")
-            return None
+        except Exception as e: status.error(f"下载失败: {str(e)[:100]}... (建议上传本地文件)"); return None
     else:
-        if file_obj is None:
-            status.error("❌ 请先上传视频文件！")
-            return None
+        if file_obj is None: status.error("❌ 请先上传视频文件！"); return None
         with open(temp_path, "wb") as f: f.write(file_obj.getbuffer())
 
-    # 2. 调用 AI
     try:
-        status.info("🧠 正在连接 AI 大脑...")
+        status.info("🧠 AI 正在进行多周期建模...")
         video_upload = genai.upload_file(path=temp_path)
-        
-        # 等待处理
-        for _ in range(30): # 最多等60秒
-            if video_upload.state.name == "PROCESSING":
-                time.sleep(2)
-                video_upload = genai.get_file(video_upload.name)
-            else:
-                break
-        
-        if video_upload.state.name == "FAILED":
-            status.error("❌ 视频处理失败")
-            return None
+        while video_upload.state.name == "PROCESSING": time.sleep(2); video_upload = genai.get_file(video_upload.name)
+        if video_upload.state.name == "FAILED": status.error("❌ 视频处理失败"); return None
 
         system_prompt = """
         你是一位顶级游资操盘手。请分析视频，总结出一套【多周期共振】的交易系统。
@@ -282,41 +264,21 @@ def process_video_comprehensive(file_obj, url, input_type, note):
             "python_code": "def analyze(daily_df, minute_df):\\n    #..."
         }
         """
-        
-        # 🔥🔥🔥 核心：智能模型切换逻辑
-        # 1. 优先尝试最快的 Flash 模型
         try:
-            status.info("🧠 正在思考 (Gemini 1.5 Flash)...")
             model = genai.GenerativeModel(model_name="gemini-1.5-flash")
             response = model.generate_content([video_upload, system_prompt, note])
         except Exception as e:
-            # 2. 如果报错 (404 Not Found), 自动降级到 Pro
             if "404" in str(e) or "not found" in str(e):
-                status.warning("⚠️ Flash 模型不可用，尝试切换至 Gemini 1.5 Pro...")
-                try:
-                    model = genai.GenerativeModel(model_name="gemini-1.5-pro")
-                    response = model.generate_content([video_upload, system_prompt, note])
-                except Exception as e2:
-                     # 3. 如果 Pro 也不行，降级到最老版本
-                     status.warning("⚠️ Pro 模型也不可用，尝试切换至 Gemini Pro (Legacy)...")
-                     model = genai.GenerativeModel(model_name="gemini-pro")
-                     # 旧版模型不支持直接传视频对象，这里做一个简化处理（只传提示词）
-                     # 注意：gemini-pro 不支持视频输入，所以如果走到这一步，其实是会失败的。
-                     # 但只要您更新了 requirements.txt，前两步一定能成功一步。
-                     raise e2
-            else:
-                raise e
+                model = genai.GenerativeModel(model_name="gemini-1.5-pro")
+                response = model.generate_content([video_upload, system_prompt, note])
+            else: raise e
 
-        # 清理
         try: genai.delete_file(video_upload.name)
         except: pass
         if os.path.exists(temp_path): os.remove(temp_path)
-        
         status.empty()
         return response.text
-    except Exception as e: 
-        status.error(f"AI Error: {str(e)[:100]}")
-        return None
+    except Exception as e: status.error(f"AI Error: {str(e)[:100]}"); return None
 
 @st.dialog("📈 个股详情", width="large")
 def view_chart_modal(code, name):
@@ -335,9 +297,9 @@ if 'calc_s1' not in st.session_state:
 
 with st.sidebar:
     st.title("控制台")
-    with st.expander("➕ 添加/编辑 个股 (手动)", expanded=True):
+    with st.expander("➕ 添加/编辑 个股", expanded=True):
         code_in = st.text_input("代码", key="cin").strip()
-        if st.button("⚡ 智能计算 R/S"):
+        if st.button("⚡ 智能计算"):
             if code_in:
                 end = datetime.now().strftime("%Y%m%d")
                 start = (datetime.now() - timedelta(days=30)).strftime("%Y%m%d")
@@ -357,11 +319,16 @@ with st.sidebar:
             r1 = c2.number_input("R1", value=float(st.session_state.calc_r1))
             r2 = c2.number_input("R2", value=float(st.session_state.calc_r2))
             
+            # 🔥 自动合并：默认分组 + 用户现有分组 + 新建选项
             df_temp = load_data()
-            groups = list(df_temp['group'].unique())
-            if "默认" not in groups: groups.insert(0, "默认")
-            grp = st.selectbox("分组", groups + ["➕ 新建..."])
-            grp_val = st.text_input("新分组名") if grp == "➕ 新建..." else grp
+            user_groups = list(df_temp['group'].unique())
+            # 过滤掉已经存在于 DEFAULT_GROUPS 里的，避免重复
+            custom_groups = [g for g in user_groups if g not in DEFAULT_GROUPS]
+            
+            all_options = DEFAULT_GROUPS + custom_groups + ["➕ 新建分组..."]
+            
+            grp = st.selectbox("分组", all_options)
+            grp_val = st.text_input("新分组名") if grp == "➕ 新建分组..." else grp
             
             learned = get_learned_logics()
             opts = BUILTIN_STRATEGIES + (learned['strategy_name'].tolist() if not learned.empty else [])
@@ -386,6 +353,7 @@ with st.sidebar:
 st.title("Alpha 游资系统 (Ultimate)")
 tab1, tab2, tab3 = st.tabs(["🔭 实战看板", "🎓 AI 深度训练", "🧠 策略逻辑库"])
 
+# --- Tab 1: 看板 (🔥 分组 Tab 化) ---
 with tab1:
     df = load_data()
     df_logics = get_learned_logics()
@@ -393,53 +361,65 @@ with tab1:
     if not df.empty:
         quotes = get_realtime_quotes_fast(df['code'].tolist())
         
-        all_groups = df['group'].unique()
-        for group in all_groups:
-            st.subheader(f"📂 {group}")
-            group_df = df[df['group'] == group]
-            rows = [r for _, r in group_df.iterrows()]
-            for i in range(0, len(rows), 4):
-                cols = st.columns(4)
-                for j, row in enumerate(rows[i:i+4]):
-                    code = row['code']; strat = row['strategy']
-                    info = quotes.get(code, {'name': row['name'], 'price': 0, 'pct': 0, 'pre_close': 0})
-                    name = info['name']; price = info['price']; pct = info['pct']
-                    
-                    with cols[j]:
-                        with st.container(border=True):
-                            c1, c2 = st.columns([3, 1])
-                            with c1: st.markdown(f"**{name}** `{code}`")
-                            with c2: 
-                                if st.button("🗑️", key=f"d_{code}"): delete_single_stock(code); st.rerun()
+        # 🔥 获取当前所有有数据的分组，并与默认分组排序
+        available_groups = df['group'].unique().tolist()
+        # 排序逻辑：优先显示 DEFAULT_GROUPS 里的顺序，其他排后面
+        sorted_groups = [g for g in DEFAULT_GROUPS if g in available_groups] + \
+                        [g for g in available_groups if g not in DEFAULT_GROUPS]
+        
+        # 🔥 使用 Streamlit 原生 Tabs 实现分组切换
+        group_tabs = st.tabs([f"📂 {g}" for g in sorted_groups])
+        
+        for i, group in enumerate(sorted_groups):
+            with group_tabs[i]:
+                group_df = df[df['group'] == group]
+                rows = [r for _, r in group_df.iterrows()]
+                
+                if len(rows) == 0:
+                    st.info(f"【{group}】板块暂无个股，请在侧边栏添加。")
+                else:
+                    for i in range(0, len(rows), 4):
+                        cols = st.columns(4)
+                        for j, row in enumerate(rows[i:i+4]):
+                            code = row['code']; strat = row['strategy']
+                            info = quotes.get(code, {'name': row['name'], 'price': 0, 'pct': 0, 'pre_close': 0})
+                            name = info['name']; price = info['price']; pct = info['pct']
                             
-                            p_col = "price-up" if pct > 0 else "price-down"
-                            st.markdown(f"<div class='big-price {p_col}'>{price} <small>{pct:+.2f}%</small></div>", unsafe_allow_html=True)
-                            
-                            bundle = get_stock_data_bundle(code)
-                            if bundle: bundle['info'].update(info)
+                            with cols[j]:
+                                with st.container(border=True):
+                                    c1, c2 = st.columns([3, 1])
+                                    with c1: st.markdown(f"**{name}** `{code}`")
+                                    with c2: 
+                                        if st.button("🗑️", key=f"d_{code}"): delete_single_stock(code); st.rerun()
+                                    
+                                    p_col = "price-up" if pct > 0 else "price-down"
+                                    st.markdown(f"<div class='big-price {p_col}'>{price} <small>{pct:+.2f}%</small></div>", unsafe_allow_html=True)
+                                    
+                                    bundle = get_stock_data_bundle(code)
+                                    if bundle: bundle['info'].update(info)
 
-                            if strat in BUILTIN_STRATEGIES:
-                                builtin_text, badge_class = evaluate_builtin_strategy(strat, bundle)
-                                st.markdown(f"<span class='strategy-badge {badge_class}'>{strat[:5]}</span> {builtin_text}", unsafe_allow_html=True)
-                            
-                            elif not df_logics.empty and strat in df_logics['strategy_name'].values:
-                                st.markdown(f"<span class='strategy-badge bg-ai'>AI战法</span> {strat}", unsafe_allow_html=True)
-                                if bundle:
-                                    logic_code = df_logics[df_logics['strategy_name']==strat].iloc[0]['python_code']
-                                    res_text, res_class = execute_ai_logic(bundle, logic_code)
-                                    st.markdown(f"<div class='signal-box {res_class}'><b>🤖:</b> {res_text}</div>", unsafe_allow_html=True)
+                                    if strat in BUILTIN_STRATEGIES:
+                                        builtin_text, badge_class = evaluate_builtin_strategy(strat, bundle)
+                                        st.markdown(f"<span class='strategy-badge {badge_class}'>{strat[:5]}</span> {builtin_text}", unsafe_allow_html=True)
+                                    
+                                    elif not df_logics.empty and strat in df_logics['strategy_name'].values:
+                                        st.markdown(f"<span class='strategy-badge bg-ai'>AI战法</span> {strat}", unsafe_allow_html=True)
+                                        if bundle:
+                                            logic_code = df_logics[df_logics['strategy_name']==strat].iloc[0]['python_code']
+                                            res_text, res_class = execute_ai_logic(bundle, logic_code)
+                                            st.markdown(f"<div class='signal-box {res_class}'><b>🤖:</b> {res_text}</div>", unsafe_allow_html=True)
 
-                            r1, r2, s1, s2 = row['r1'], row['r2'], row['s1'], row['s2']
-                            st.markdown(f"""
-                            <div class='sr-block'>
-                                <div class='sr-item'><span style='color:#d9534f'>R2</span> {r2}{get_dist_html(r2, price)}</div>
-                                <div class='sr-item'><span style='color:#5cb85c'>S1</span> {s1}{get_dist_html(s1, price)}</div>
-                                <div class='sr-item'><span style='color:#f0ad4e'>R1</span> {r1}{get_dist_html(r1, price)}</div>
-                                <div class='sr-item'><span style='color:#4cae4c'>S2</span> {s2}{get_dist_html(s2, price)}</div>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            
-                            if st.button("📈 看图", key=f"b_{code}"): view_chart_modal(code, name)
+                                    r1, r2, s1, s2 = row['r1'], row['r2'], row['s1'], row['s2']
+                                    st.markdown(f"""
+                                    <div class='sr-block'>
+                                        <div class='sr-item'><span style='color:#d9534f'>R2</span> {r2}{get_dist_html(r2, price)}</div>
+                                        <div class='sr-item'><span style='color:#5cb85c'>S1</span> {s1}{get_dist_html(s1, price)}</div>
+                                        <div class='sr-item'><span style='color:#f0ad4e'>R1</span> {r1}{get_dist_html(r1, price)}</div>
+                                        <div class='sr-item'><span style='color:#4cae4c'>S2</span> {s2}{get_dist_html(s2, price)}</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                    
+                                    if st.button("📈 看图", key=f"b_{code}"): view_chart_modal(code, name)
     else:
         st.info("👈 暂无股票，请在左侧添加！")
 
